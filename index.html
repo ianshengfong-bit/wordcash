@@ -1,0 +1,2857 @@
+<!doctype html>
+<html lang="zh-Hant">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="theme-color"
+        content="#172033"
+    >
+
+    <meta
+        name="description"
+        content="YAO 加班費計算器"
+    >
+
+    <title>YAO 加班費計算器</title>
+
+    <style>
+
+        /* =====================================================
+           基礎
+        ===================================================== */
+
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #f4f7fb;
+            --surface: #ffffff;
+            --surface-soft: #f8fafc;
+
+            --text: #172033;
+            --text-dark: #111827;
+            --text-muted: #64748b;
+            --text-light: #94a3b8;
+
+            --border: #e2e8f0;
+            --border-light: #edf2f7;
+
+            --primary: #172033;
+            --primary-hover: #24324a;
+
+            --accent: #5b9bd5;
+            --accent-soft: #eaf4ff;
+
+            --success: #16845b;
+            --success-soft: #eaf8f1;
+
+            --warning: #b7791f;
+            --warning-soft: #fff7e6;
+
+            --danger: #c24141;
+            --danger-soft: #fff0f0;
+
+            --shadow-sm:
+                0 4px 14px rgba(15, 23, 42, 0.05);
+
+            --shadow-md:
+                0 12px 35px rgba(15, 23, 42, 0.08);
+
+            --radius-lg: 22px;
+            --radius-md: 17px;
+            --radius-sm: 12px;
+        }
+
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100%;
+            font-family:
+                "Noto Sans TC",
+                "Microsoft JhengHei",
+                "PingFang TC",
+                Arial,
+                sans-serif;
+
+            background:
+                linear-gradient(
+                    180deg,
+                    #eef4fa 0,
+                    #f4f7fb 250px,
+                    #f4f7fb 100%
+                );
+
+            color: var(--text);
+            -webkit-font-smoothing: antialiased;
+        }
+
+
+        body {
+            padding: 28px 20px 50px;
+        }
+
+
+        button,
+        input,
+        select,
+        textarea {
+            font: inherit;
+        }
+
+
+        button {
+            cursor: pointer;
+        }
+
+
+        button,
+        input,
+        select,
+        textarea {
+            -webkit-tap-highlight-color: transparent;
+        }
+
+
+        /* =====================================================
+           APP
+        ===================================================== */
+
+        .app {
+            width: min(1180px, 100%);
+            margin: 0 auto;
+        }
+
+
+        /* =====================================================
+           上方品牌
+        ===================================================== */
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+
+            margin-bottom: 22px;
+        }
+
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+
+        .brand-icon {
+            width: 54px;
+            height: 54px;
+
+            border-radius: 17px;
+
+            display: grid;
+            place-items: center;
+
+            background:
+                linear-gradient(
+                    145deg,
+                    #172033,
+                    #2b3c58
+                );
+
+            color: #ffffff;
+
+            font-size: 25px;
+
+            box-shadow:
+                0 9px 24px
+                rgba(23, 32, 51, 0.17);
+        }
+
+
+        .brand h1 {
+            margin: 0;
+
+            font-size: 24px;
+            font-weight: 800;
+
+            letter-spacing: -0.4px;
+        }
+
+
+        .brand p {
+            margin: 4px 0 0;
+
+            color: var(--text-muted);
+
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+
+        .settings-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+
+            border: 1px solid var(--border);
+
+            border-radius: 13px;
+
+            padding: 10px 15px;
+
+            background: rgba(255, 255, 255, 0.92);
+
+            color: #374151;
+
+            box-shadow: var(--shadow-sm);
+
+            transition:
+                background .18s ease,
+                border-color .18s ease,
+                transform .18s ease;
+        }
+
+
+        .settings-btn:hover {
+            background: #ffffff;
+            border-color: #cbd5e1;
+            transform: translateY(-1px);
+        }
+
+
+        /* =====================================================
+           主要收入摘要
+        ===================================================== */
+
+        .summary-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(4, 1fr);
+
+            gap: 14px;
+
+            margin-bottom: 14px;
+        }
+
+
+        .summary-card {
+            position: relative;
+
+            background: var(--surface);
+
+            border: 1px solid
+                rgba(226, 232, 240, 0.85);
+
+            border-radius: var(--radius-md);
+
+            padding: 20px;
+
+            box-shadow: var(--shadow-sm);
+
+            overflow: hidden;
+
+            transition:
+                transform .18s ease,
+                box-shadow .18s ease;
+        }
+
+
+        .summary-card:hover {
+            transform: translateY(-2px);
+
+            box-shadow:
+                0 11px 28px
+                rgba(15, 23, 42, 0.08);
+        }
+
+
+        .summary-card::after {
+            content: "";
+
+            position: absolute;
+
+            top: 0;
+            right: 0;
+
+            width: 78px;
+            height: 78px;
+
+            border-radius: 0 0 0 78px;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    rgba(91, 155, 213, 0.11),
+                    transparent 70%
+                );
+
+            pointer-events: none;
+        }
+
+
+        .summary-label {
+            position: relative;
+            z-index: 1;
+
+            color: var(--text-muted);
+
+            font-size: 13px;
+            line-height: 1.5;
+
+            margin-bottom: 9px;
+        }
+
+
+        .summary-value {
+            position: relative;
+            z-index: 1;
+
+            font-size: 27px;
+            font-weight: 800;
+
+            color: var(--text-dark);
+
+            letter-spacing: -0.5px;
+
+            line-height: 1.2;
+        }
+
+
+        /*
+         * ★ 最重要：本月預估總收入
+         */
+
+        .summary-grid:first-of-type
+        .summary-card:last-child {
+            background:
+                linear-gradient(
+                    145deg,
+                    #172033 0%,
+                    #24324a 100%
+                );
+
+            border-color: #172033;
+
+            box-shadow:
+                0 14px 34px
+                rgba(23, 32, 51, 0.20);
+        }
+
+
+        .summary-grid:first-of-type
+        .summary-card:last-child::after {
+            background:
+                radial-gradient(
+                    circle at top right,
+                    rgba(130, 190, 237, 0.30),
+                    transparent 63%
+                );
+        }
+
+
+        .summary-grid:first-of-type
+        .summary-card:last-child
+        .summary-label {
+            color: rgba(255, 255, 255, 0.72);
+        }
+
+
+        .summary-grid:first-of-type
+        .summary-card:last-child
+        .summary-value {
+            color: #ffffff;
+
+            font-size: 30px;
+        }
+
+
+        .summary-grid.small {
+            margin-bottom: 20px;
+        }
+
+
+        .summary-grid.small
+        .summary-card {
+            padding: 17px 19px;
+        }
+
+
+        .summary-grid.small
+        .summary-value {
+            font-size: 20px;
+        }
+
+
+        /* =====================================================
+           月份工具列
+        ===================================================== */
+
+        .month-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            gap: 15px;
+
+            flex-wrap: wrap;
+
+            padding: 13px;
+
+            margin-bottom: 20px;
+
+            background:
+                rgba(255, 255, 255, 0.96);
+
+            border:
+                1px solid
+                rgba(226, 232, 240, 0.95);
+
+            border-radius: var(--radius-md);
+
+            box-shadow: var(--shadow-sm);
+        }
+
+
+        .month-control {
+            display: flex;
+            align-items: center;
+
+            gap: 7px;
+        }
+
+
+        .month-control button {
+            width: 40px;
+            height: 40px;
+
+            border: 1px solid var(--border);
+
+            border-radius: 11px;
+
+            background: #f8fafc;
+
+            color: #334155;
+
+            font-size: 22px;
+            line-height: 1;
+
+            transition:
+                background .18s ease,
+                border-color .18s ease;
+        }
+
+
+        .month-control button:hover {
+            background: #eef3f8;
+            border-color: #cbd5e1;
+        }
+
+
+        #monthPicker {
+            min-width: 155px;
+
+            border:
+                1px solid
+                var(--border);
+
+            border-radius: 11px;
+
+            padding: 10px 12px;
+
+            background: #ffffff;
+
+            color: var(--text-dark);
+
+            outline: none;
+        }
+
+
+        #monthPicker:focus {
+            border-color: #9bbce0;
+
+            box-shadow:
+                0 0 0 3px
+                rgba(91, 155, 213, 0.12);
+        }
+
+
+        .toolbar-actions {
+            display: flex;
+
+            gap: 8px;
+
+            flex-wrap: wrap;
+        }
+
+
+        /* =====================================================
+           按鈕
+        ===================================================== */
+
+        .primary,
+        .secondary,
+        .danger {
+            border: 0;
+
+            border-radius: 11px;
+
+            padding: 10px 15px;
+
+            min-height: 40px;
+
+            font-weight: 650;
+
+            transition:
+                transform .15s ease,
+                box-shadow .15s ease,
+                background .15s ease;
+        }
+
+
+        .primary {
+            background:
+                linear-gradient(
+                    135deg,
+                    #172033,
+                    #263653
+                );
+
+            color: #ffffff;
+
+            box-shadow:
+                0 5px 14px
+                rgba(23, 32, 51, 0.15);
+        }
+
+
+        .primary:hover {
+            background:
+                linear-gradient(
+                    135deg,
+                    #21304a,
+                    #314461
+                );
+
+            transform: translateY(-1px);
+        }
+
+
+        .secondary {
+            background: #f1f5f9;
+
+            color: #334155;
+
+            border:
+                1px solid
+                #e2e8f0;
+        }
+
+
+        .secondary:hover {
+            background: #e8eef5;
+
+            border-color: #cbd5e1;
+
+            transform: translateY(-1px);
+        }
+
+
+        .danger {
+            background: var(--danger-soft);
+
+            color: var(--danger);
+
+            border:
+                1px solid
+                #f5cccc;
+        }
+
+
+        .danger:hover {
+            background: #ffe4e4;
+
+            transform: translateY(-1px);
+        }
+
+
+        /* =====================================================
+           通用 section
+        ===================================================== */
+
+        .section {
+            background: var(--surface);
+
+            border:
+                1px solid
+                rgba(226, 232, 240, 0.90);
+
+            border-radius: var(--radius-lg);
+
+            padding: 22px;
+
+            margin-bottom: 18px;
+
+            box-shadow: var(--shadow-sm);
+        }
+
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            gap: 12px;
+
+            margin-bottom: 17px;
+        }
+
+
+        .section-header h2 {
+            position: relative;
+
+            margin: 0;
+
+            padding-left: 13px;
+
+            font-size: 19px;
+            font-weight: 800;
+
+            color: var(--text-dark);
+        }
+
+
+        .section-header h2::before {
+            content: "";
+
+            position: absolute;
+
+            left: 0;
+            top: 2px;
+            bottom: 2px;
+
+            width: 4px;
+
+            border-radius: 999px;
+
+            background:
+                linear-gradient(
+                    180deg,
+                    #5b9bd5,
+                    #8abbe2
+                );
+        }
+
+
+        /* =====================================================
+           本月結算
+        ===================================================== */
+
+        .settlement-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(4, 1fr);
+
+            gap: 12px;
+        }
+
+
+        .settlement-item {
+            background:
+                linear-gradient(
+                    145deg,
+                    #f8fafc,
+                    #f2f6fa
+                );
+
+            border:
+                1px solid
+                var(--border-light);
+
+            border-radius: 14px;
+
+            padding: 16px;
+        }
+
+
+        .settlement-item span {
+            display: block;
+
+            color: var(--text-muted);
+
+            font-size: 13px;
+
+            margin-bottom: 7px;
+        }
+
+
+        .settlement-item strong {
+            font-size: 21px;
+
+            color: var(--text-dark);
+        }
+
+
+        /* =====================================================
+           出勤紀錄
+        ===================================================== */
+
+        .records {
+            display: flex;
+
+            flex-direction: column;
+
+            gap: 11px;
+        }
+
+
+        .record-card {
+            position: relative;
+
+            border:
+                1px solid
+                var(--border);
+
+            border-radius: 16px;
+
+            padding: 17px 18px;
+
+            background:
+                linear-gradient(
+                    180deg,
+                    #ffffff,
+                    #fbfdff
+                );
+
+            transition:
+                border-color .18s ease,
+                box-shadow .18s ease,
+                transform .18s ease;
+        }
+
+
+        .record-card:hover {
+            border-color: #cbd5e1;
+
+            box-shadow:
+                0 8px 22px
+                rgba(15, 23, 42, 0.05);
+
+            transform: translateY(-1px);
+        }
+
+
+        .record-top {
+            display: flex;
+
+            justify-content: space-between;
+
+            align-items: flex-start;
+
+            gap: 15px;
+        }
+
+
+        .record-title {
+            font-weight: 800;
+
+            font-size: 16px;
+
+            color: var(--text-dark);
+        }
+
+
+        .record-subtitle {
+            color: var(--text-muted);
+
+            font-size: 13px;
+
+            margin-top: 5px;
+
+            line-height: 1.55;
+        }
+
+
+        .record-pay {
+            font-size: 20px;
+
+            font-weight: 800;
+
+            color: #1e5f91;
+
+            white-space: nowrap;
+        }
+
+
+        .record-metrics {
+            display: grid;
+
+            grid-template-columns:
+                repeat(3, 1fr);
+
+            gap: 8px;
+
+            margin-top: 14px;
+        }
+
+
+        .metric {
+            background: #f7fafc;
+
+            border:
+                1px solid
+                #edf2f7;
+
+            border-radius: 11px;
+
+            padding: 10px 11px;
+        }
+
+
+        .metric span {
+            display: block;
+
+            color: var(--text-muted);
+
+            font-size: 12px;
+
+            margin-bottom: 4px;
+        }
+
+
+        .metric strong {
+            font-size: 14px;
+
+            color: var(--text-dark);
+        }
+
+
+        .record-actions {
+            display: flex;
+
+            justify-content: flex-end;
+
+            gap: 8px;
+
+            margin-top: 13px;
+        }
+
+
+        /* =====================================================
+           空狀態
+        ===================================================== */
+
+        .empty-state {
+            padding: 40px 20px;
+
+            text-align: center;
+
+            color: #9aa7b8;
+
+            border:
+                1px dashed
+                #cbd5e1;
+
+            border-radius: 15px;
+
+            background:
+                linear-gradient(
+                    180deg,
+                    #fbfdff,
+                    #f8fafc
+                );
+
+            line-height: 1.7;
+        }
+
+
+        /* =====================================================
+           里程
+        ===================================================== */
+
+        .mileage-summary {
+            display: grid;
+
+            grid-template-columns:
+                repeat(3, 1fr);
+
+            gap: 12px;
+
+            margin-bottom: 16px;
+        }
+
+
+        .mileage-summary-item {
+            position: relative;
+
+            background:
+                linear-gradient(
+                    145deg,
+                    #f8fafc,
+                    #f1f7fc
+                );
+
+            border:
+                1px solid
+                var(--border-light);
+
+            border-radius: 15px;
+
+            padding: 16px;
+        }
+
+
+        .mileage-summary-item:last-child {
+            background:
+                linear-gradient(
+                    145deg,
+                    #eef8f3,
+                    #e8f6ef
+                );
+
+            border-color:
+                #d4eee0;
+        }
+
+
+        .mileage-summary-item span {
+            display: block;
+
+            color: var(--text-muted);
+
+            font-size: 13px;
+
+            margin-bottom: 6px;
+        }
+
+
+        .mileage-summary-item strong {
+            font-size: 21px;
+
+            color: var(--text-dark);
+        }
+
+
+        .mileage-summary-item:last-child strong {
+            color: var(--success);
+        }
+
+
+        .mileage-records {
+            display: flex;
+
+            flex-direction: column;
+
+            gap: 10px;
+        }
+
+
+        .mileage-card {
+            border:
+                1px solid
+                var(--border);
+
+            border-radius: 14px;
+
+            padding: 15px 16px;
+
+            background: #ffffff;
+        }
+
+
+        .mileage-top {
+            display: flex;
+
+            justify-content: space-between;
+
+            gap: 10px;
+        }
+
+
+        .mileage-title {
+            font-weight: 750;
+
+            color: var(--text-dark);
+        }
+
+
+        .mileage-net {
+            font-weight: 800;
+
+            font-size: 18px;
+
+            color: var(--success);
+        }
+
+
+        .mileage-detail {
+            margin-top: 8px;
+
+            color: var(--text-muted);
+
+            font-size: 13px;
+
+            line-height: 1.75;
+        }
+
+
+        /* =====================================================
+           資料管理
+        ===================================================== */
+
+        .data-buttons {
+            display: flex;
+
+            gap: 9px;
+
+            flex-wrap: wrap;
+        }
+
+
+        .data-buttons button {
+            min-height: 42px;
+        }
+
+
+        #exportPdfBtn {
+            background:
+                linear-gradient(
+                    135deg,
+                    #245f88,
+                    #317eae
+                );
+
+            box-shadow:
+                0 6px 16px
+                rgba(49, 126, 174, 0.16);
+        }
+
+
+        #exportPdfBtn:hover {
+            background:
+                linear-gradient(
+                    135deg,
+                    #2a6d9b,
+                    #3d8dbd
+                );
+        }
+
+
+        #clearMonthBtn,
+        #clearAllRecordsBtn {
+            margin-left: auto;
+        }
+
+
+        /* =====================================================
+           Modal
+        ===================================================== */
+
+        .modal {
+            position: fixed;
+
+            inset: 0;
+
+            display: none;
+
+            align-items: center;
+
+            justify-content: center;
+
+            padding: 20px;
+
+            background:
+                rgba(15, 23, 42, 0.58);
+
+            backdrop-filter: blur(4px);
+
+            -webkit-backdrop-filter: blur(4px);
+
+            z-index: 1000;
+        }
+
+
+        .modal.show {
+            display: flex;
+        }
+
+
+        .modal-content {
+            width: min(640px, 100%);
+
+            max-height: 91vh;
+
+            overflow-y: auto;
+
+            background: #ffffff;
+
+            border:
+                1px solid
+                rgba(226, 232, 240, 0.95);
+
+            border-radius: 22px;
+
+            padding: 25px;
+
+            box-shadow:
+                0 28px 85px
+                rgba(15, 23, 42, 0.24);
+
+            animation:
+                modalIn .18s ease-out;
+        }
+
+
+        @keyframes modalIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px) scale(.985);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+
+        .modal-header {
+            display: flex;
+
+            align-items: center;
+
+            justify-content: space-between;
+
+            gap: 12px;
+
+            margin-bottom: 21px;
+        }
+
+
+        .modal-header h2 {
+            margin: 0;
+
+            font-size: 20px;
+
+            font-weight: 800;
+
+            color: var(--text-dark);
+        }
+
+
+        .close-btn {
+            border:
+                1px solid
+                var(--border);
+
+            background: #f8fafc;
+
+            color: #475569;
+
+            width: 38px;
+            height: 38px;
+
+            border-radius: 11px;
+
+            font-size: 15px;
+
+            transition:
+                background .18s ease,
+                transform .18s ease;
+        }
+
+
+        .close-btn:hover {
+            background: #eef2f7;
+
+            transform: rotate(4deg);
+        }
+
+
+        /* =====================================================
+           表單
+        ===================================================== */
+
+        .form-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(2, 1fr);
+
+            gap: 15px;
+        }
+
+
+        .form-group {
+            display: flex;
+
+            flex-direction: column;
+
+            gap: 7px;
+        }
+
+
+        .form-group.full {
+            grid-column: 1 / -1;
+        }
+
+
+        .form-group label {
+            font-size: 13px;
+
+            color: #475569;
+
+            font-weight: 700;
+        }
+
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+
+            border:
+                1px solid
+                #cfd8e3;
+
+            border-radius: 11px;
+
+            padding: 11px 12px;
+
+            background: #ffffff;
+
+            color: var(--text-dark);
+
+            outline: none;
+
+            transition:
+                border-color .16s ease,
+                box-shadow .16s ease,
+                background .16s ease;
+        }
+
+
+        .form-group textarea {
+            min-height: 86px;
+
+            resize: vertical;
+        }
+
+
+        .form-group input:hover,
+        .form-group select:hover,
+        .form-group textarea:hover {
+            border-color: #b9c5d3;
+        }
+
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            border-color: #6ba2cd;
+
+            box-shadow:
+                0 0 0 3px
+                rgba(91, 155, 213, 0.12);
+
+            background: #fcfeff;
+        }
+
+
+        .preview {
+            margin-top: 16px;
+
+            padding: 15px 16px;
+
+            border:
+                1px solid
+                #dbe8f4;
+
+            border-radius: 13px;
+
+            background:
+                linear-gradient(
+                    145deg,
+                    #f5faff,
+                    #f8fbfe
+                );
+
+            color: #334155;
+
+            line-height: 1.85;
+
+            font-size: 14px;
+        }
+
+
+        .modal-actions {
+            display: flex;
+
+            justify-content: flex-end;
+
+            gap: 9px;
+
+            margin-top: 20px;
+        }
+
+
+        .hint {
+            color: #94a3b8;
+
+            font-size: 12px;
+
+            line-height: 1.5;
+
+            margin-top: 0;
+        }
+
+
+        /* =====================================================
+           捲軸
+        ===================================================== */
+
+        * {
+            scrollbar-width: thin;
+
+            scrollbar-color:
+                #cbd5e1
+                transparent;
+        }
+
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+
+            border-radius: 999px;
+        }
+
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+
+        /* =====================================================
+           平板
+        ===================================================== */
+
+        @media (max-width: 980px) {
+
+            .summary-grid {
+                grid-template-columns:
+                    repeat(2, 1fr);
+            }
+
+
+            .settlement-grid {
+                grid-template-columns:
+                    repeat(2, 1fr);
+            }
+
+        }
+
+
+        /* =====================================================
+           手機
+        ===================================================== */
+
+        @media (max-width: 680px) {
+
+            body {
+                padding:
+                    14px 10px 35px;
+            }
+
+
+            .topbar {
+                align-items: flex-start;
+
+                gap: 12px;
+
+                margin-bottom: 16px;
+            }
+
+
+            .brand {
+                gap: 10px;
+            }
+
+
+            .brand-icon {
+                width: 46px;
+                height: 46px;
+
+                border-radius: 14px;
+
+                font-size: 21px;
+            }
+
+
+            .brand h1 {
+                font-size: 19px;
+
+                letter-spacing: -0.2px;
+            }
+
+
+            .brand p {
+                font-size: 12px;
+            }
+
+
+            .settings-btn {
+                padding:
+                    9px 11px;
+
+                font-size: 13px;
+            }
+
+
+            .summary-grid {
+                grid-template-columns:
+                    repeat(2, 1fr);
+
+                gap: 9px;
+
+                margin-bottom: 9px;
+            }
+
+
+            .summary-card {
+                min-height: 102px;
+
+                padding:
+                    14px 13px;
+
+                border-radius: 15px;
+            }
+
+
+            .summary-label {
+                font-size: 12px;
+
+                margin-bottom: 7px;
+            }
+
+
+            .summary-value {
+                font-size: 20px;
+            }
+
+
+            .summary-grid:first-of-type
+            .summary-card:last-child
+            .summary-value {
+                font-size: 22px;
+            }
+
+
+            .summary-grid.small
+            .summary-card {
+                min-height: 88px;
+
+                padding:
+                    13px 12px;
+            }
+
+
+            .summary-grid.small
+            .summary-value {
+                font-size: 17px;
+            }
+
+
+            .month-toolbar {
+                padding: 10px;
+
+                margin-bottom: 14px;
+
+                border-radius: 15px;
+            }
+
+
+            .month-control {
+                width: 100%;
+            }
+
+
+            .month-control button {
+                width: 38px;
+                height: 38px;
+            }
+
+
+            #monthPicker {
+                flex: 1;
+
+                min-width: 0;
+
+                text-align: center;
+            }
+
+
+            .toolbar-actions {
+                width: 100%;
+            }
+
+
+            .toolbar-actions button {
+                flex: 1;
+
+                min-width: 0;
+            }
+
+
+            .section {
+                padding: 16px;
+
+                border-radius: 17px;
+
+                margin-bottom: 13px;
+            }
+
+
+            .section-header {
+                margin-bottom: 14px;
+            }
+
+
+            .section-header h2 {
+                font-size: 17px;
+            }
+
+
+            .settlement-grid {
+                grid-template-columns:
+                    repeat(2, 1fr);
+
+                gap: 9px;
+            }
+
+
+            .settlement-item {
+                padding: 13px;
+
+                border-radius: 12px;
+            }
+
+
+            .settlement-item strong {
+                font-size: 18px;
+            }
+
+
+            .record-card {
+                padding: 14px;
+
+                border-radius: 14px;
+            }
+
+
+            .record-top {
+                gap: 10px;
+            }
+
+
+            .record-title {
+                font-size: 15px;
+            }
+
+
+            .record-subtitle {
+                font-size: 12px;
+            }
+
+
+            .record-pay {
+                font-size: 17px;
+            }
+
+
+            .record-metrics {
+                grid-template-columns:
+                    repeat(2, 1fr);
+
+                gap: 7px;
+
+                margin-top: 11px;
+            }
+
+
+            .metric {
+                padding:
+                    9px 10px;
+            }
+
+
+            .record-actions {
+                justify-content: stretch;
+
+                flex-wrap: wrap;
+            }
+
+
+            .record-actions button {
+                flex: 1;
+            }
+
+
+            .mileage-summary {
+                grid-template-columns:
+                    repeat(2, 1fr);
+
+                gap: 9px;
+            }
+
+
+            .mileage-summary-item {
+                padding: 13px;
+
+                border-radius: 13px;
+            }
+
+
+            .mileage-summary-item:last-child {
+                grid-column: 1 / -1;
+            }
+
+
+            .mileage-summary-item strong {
+                font-size: 18px;
+            }
+
+
+            .mileage-card {
+                padding: 13px;
+
+                border-radius: 13px;
+            }
+
+
+            .mileage-net {
+                font-size: 17px;
+            }
+
+
+            .data-buttons {
+                display: grid;
+
+                grid-template-columns:
+                    repeat(2, 1fr);
+            }
+
+
+            .data-buttons button {
+                width: 100%;
+            }
+
+
+            #exportPdfBtn {
+                grid-column: 1 / -1;
+            }
+
+
+            #clearMonthBtn,
+            #clearAllRecordsBtn {
+                margin-left: 0;
+            }
+
+
+            .modal {
+                padding: 10px;
+            }
+
+
+            .modal-content {
+                max-height: 94vh;
+
+                padding: 18px;
+
+                border-radius: 18px;
+            }
+
+
+            .modal-header {
+                margin-bottom: 17px;
+            }
+
+
+            .modal-header h2 {
+                font-size: 18px;
+            }
+
+
+            .form-grid {
+                grid-template-columns: 1fr;
+
+                gap: 13px;
+            }
+
+
+            .form-group.full {
+                grid-column: auto;
+            }
+
+
+            .form-group input,
+            .form-group select,
+            .form-group textarea {
+                padding:
+                    11px 12px;
+
+                font-size: 16px;
+            }
+
+
+            .modal-actions {
+                display: grid;
+
+                grid-template-columns:
+                    1fr 1fr;
+
+                gap: 8px;
+            }
+
+
+            .modal-actions button {
+                width: 100%;
+            }
+
+        }
+
+
+        /* =====================================================
+           超小手機
+        ===================================================== */
+
+        @media (max-width: 390px) {
+
+            .summary-card {
+                min-height: 94px;
+
+                padding:
+                    12px 11px;
+            }
+
+
+            .summary-value {
+                font-size: 18px;
+            }
+
+
+            .summary-grid:first-of-type
+            .summary-card:last-child
+            .summary-value {
+                font-size: 20px;
+            }
+
+
+            .summary-grid.small
+            .summary-value {
+                font-size: 16px;
+            }
+
+
+            .brand h1 {
+                font-size: 18px;
+            }
+
+
+            .settings-btn {
+                font-size: 12px;
+
+                padding:
+                    8px 9px;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+<div class="app">
+
+
+    <!-- =====================================================
+         Header
+    ====================================================== -->
+
+    <header class="topbar">
+
+        <div class="brand">
+
+            <div class="brand-icon">
+                💰
+            </div>
+
+            <div>
+
+                <h1>
+                    YAO 加班費計算器
+                </h1>
+
+                <p>
+                    加班、里程補助與每月收入管理
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <button
+            id="settingsBtn"
+            class="settings-btn"
+            type="button"
+        >
+            ⚙️ 設定
+        </button>
+
+    </header>
+
+
+    <!-- =====================================================
+         收入總覽
+    ====================================================== -->
+
+    <section class="summary-grid">
+
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                本月加班費
+            </div>
+
+            <div
+                id="monthOvertimePay"
+                class="summary-value"
+            >
+                $0
+            </div>
+
+        </div>
+
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                里程淨收入
+            </div>
+
+            <div
+                id="monthMileageNet"
+                class="summary-value"
+            >
+                $0
+            </div>
+
+        </div>
+
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                額外收入
+            </div>
+
+            <div
+                id="monthExtraIncome"
+                class="summary-value"
+            >
+                $0
+            </div>
+
+        </div>
+
+
+        <!-- 最重要 -->
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                本月預估總收入
+            </div>
+
+            <div
+                id="monthTotalIncome"
+                class="summary-value"
+            >
+                $0
+            </div>
+
+        </div>
+
+
+    </section>
+
+
+    <!-- =====================================================
+         工作統計
+    ====================================================== -->
+
+    <section class="summary-grid small">
+
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                公司計薪時數
+            </div>
+
+            <div
+                id="monthPaidHours"
+                class="summary-value"
+            >
+                0
+            </div>
+
+        </div>
+
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                加班天數
+            </div>
+
+            <div
+                id="monthDays"
+                class="summary-value"
+            >
+                0
+            </div>
+
+        </div>
+
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                里程
+            </div>
+
+            <div
+                id="mileageKm"
+                class="summary-value"
+            >
+                0 km
+            </div>
+
+        </div>
+
+
+        <div class="summary-card">
+
+            <div class="summary-label">
+                出勤筆數
+            </div>
+
+            <div
+                id="recordCount"
+                class="summary-value"
+            >
+                0
+            </div>
+
+        </div>
+
+
+    </section>
+
+
+    <!-- =====================================================
+         月份控制
+    ====================================================== -->
+
+    <div class="month-toolbar">
+
+
+        <div class="month-control">
+
+
+            <button
+                id="prevMonth"
+                type="button"
+                aria-label="上一個月"
+            >
+                ‹
+            </button>
+
+
+            <input
+                id="monthPicker"
+                type="month"
+                aria-label="選擇月份"
+            >
+
+
+            <button
+                id="nextMonth"
+                type="button"
+                aria-label="下一個月"
+            >
+                ›
+            </button>
+
+
+        </div>
+
+
+        <div class="toolbar-actions">
+
+
+            <button
+                id="addRecordBtn"
+                class="primary"
+                type="button"
+            >
+                ＋ 新增出勤
+            </button>
+
+
+            <button
+                id="addMileageBtn"
+                class="secondary"
+                type="button"
+            >
+                ＋ 新增里程
+            </button>
+
+
+        </div>
+
+
+    </div>
+
+
+    <!-- =====================================================
+         本月結算
+    ====================================================== -->
+
+    <section class="section">
+
+
+        <div class="section-header">
+
+            <h2>
+                本月結算
+            </h2>
+
+        </div>
+
+
+        <div class="settlement-grid">
+
+
+            <div class="settlement-item">
+
+                <span>
+                    平日加班
+                </span>
+
+                <strong id="weekdayHours">
+                    0
+                </strong>
+
+            </div>
+
+
+            <div class="settlement-item">
+
+                <span>
+                    休假日
+                </span>
+
+                <strong id="restHours">
+                    0
+                </strong>
+
+            </div>
+
+
+            <div class="settlement-item">
+
+                <span>
+                    國定／公司假日
+                </span>
+
+                <strong id="holidayHours">
+                    0
+                </strong>
+
+            </div>
+
+
+            <div class="settlement-item">
+
+                <span>
+                    實際加班
+                </span>
+
+                <strong id="actualHours">
+                    0
+                </strong>
+
+            </div>
+
+
+        </div>
+
+
+    </section>
+
+
+    <!-- =====================================================
+         出勤紀錄
+    ====================================================== -->
+
+    <section class="section">
+
+
+        <div class="section-header">
+
+            <h2>
+                出勤紀錄
+            </h2>
+
+        </div>
+
+
+        <div
+            id="records"
+            class="records"
+        ></div>
+
+
+        <div
+            id="emptyState"
+            class="empty-state"
+        >
+            本月尚無出勤紀錄
+        </div>
+
+
+    </section>
+
+
+    <!-- =====================================================
+         里程補助
+    ====================================================== -->
+
+    <section class="section">
+
+
+        <div class="section-header">
+
+
+            <h2>
+                里程補助
+            </h2>
+
+
+            <button
+                id="addMileageBtn2"
+                class="secondary"
+                type="button"
+                onclick="document.getElementById('addMileageBtn').click()"
+            >
+                ＋ 新增
+            </button>
+
+
+        </div>
+
+
+        <div class="mileage-summary">
+
+
+            <div class="mileage-summary-item">
+
+                <span>
+                    補助總額
+                </span>
+
+                <strong id="mileageGross">
+                    $0
+                </strong>
+
+            </div>
+
+
+            <div class="mileage-summary-item">
+
+                <span>
+                    車輛損耗
+                </span>
+
+                <strong id="mileageWear">
+                    $0
+                </strong>
+
+            </div>
+
+
+            <div class="mileage-summary-item">
+
+                <span>
+                    實際收入
+                </span>
+
+                <strong id="mileageNet">
+                    $0
+                </strong>
+
+            </div>
+
+
+        </div>
+
+
+        <div
+            id="mileageRecords"
+            class="mileage-records"
+        ></div>
+
+
+        <div
+            id="emptyMileageState"
+            class="empty-state"
+        >
+            本月尚無里程紀錄
+        </div>
+
+
+    </section>
+
+
+    <!-- =====================================================
+         資料管理
+    ====================================================== -->
+
+    <section class="section">
+
+
+        <div class="section-header">
+
+            <h2>
+                資料管理
+            </h2>
+
+        </div>
+
+
+        <div class="data-buttons">
+
+
+            <button
+                id="exportPdfBtn"
+                class="primary"
+                type="button"
+            >
+                📄 匯出薪資單 PDF
+            </button>
+
+
+            <button
+                id="exportBtn"
+                class="secondary"
+                type="button"
+            >
+                匯出資料
+            </button>
+
+
+            <button
+                id="importBtn"
+                class="secondary"
+                type="button"
+            >
+                匯入資料
+            </button>
+
+
+            <input
+                id="importFile"
+                type="file"
+                accept=".json,application/json"
+                hidden
+            >
+
+
+            <button
+                id="clearMonthBtn"
+                class="danger"
+                type="button"
+            >
+                清除本月
+            </button>
+
+
+            <button
+                id="clearAllRecordsBtn"
+                class="danger"
+                type="button"
+            >
+                清除全部資料
+            </button>
+
+
+        </div>
+
+
+    </section>
+
+
+</div>
+
+
+<!-- =========================================================
+     出勤 Modal
+========================================================== -->
+
+<div
+    id="recordModal"
+    class="modal"
+>
+
+
+    <div class="modal-content">
+
+
+        <div class="modal-header">
+
+            <h2 id="recordModalTitle">
+                新增出勤
+            </h2>
+
+
+            <button
+                id="closeRecordModal"
+                class="close-btn"
+                type="button"
+                aria-label="關閉"
+            >
+                ✕
+            </button>
+
+        </div>
+
+
+        <form id="recordForm">
+
+
+            <input
+                id="recordId"
+                type="hidden"
+            >
+
+
+            <div class="form-grid">
+
+
+                <div class="form-group">
+
+                    <label for="date">
+                        日期
+                    </label>
+
+                    <input
+                        id="date"
+                        type="date"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="dayType">
+                        日期類型
+                    </label>
+
+                    <select
+                        id="dayType"
+                        required
+                    >
+
+                        <option value="weekday">
+                            平日
+                        </option>
+
+                        <option value="rest">
+                            休假日
+                        </option>
+
+                        <option value="holiday">
+                            國定／公司假日
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="start">
+                        開始時間
+                    </label>
+
+                    <input
+                        id="start"
+                        type="time"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="end">
+                        結束時間
+                    </label>
+
+                    <input
+                        id="end"
+                        type="time"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="breakMinutes">
+                        休息時間（分鐘）
+                    </label>
+
+                    <input
+                        id="breakMinutes"
+                        type="number"
+                        min="0"
+                        value="0"
+                    >
+
+                </div>
+
+
+                <div class="form-group full">
+
+                    <label for="note">
+                        備註
+                    </label>
+
+                    <textarea
+                        id="note"
+                        placeholder="例如：支援○○案場"
+                    ></textarea>
+
+                </div>
+
+
+            </div>
+
+
+            <div
+                id="preview"
+                class="preview"
+            ></div>
+
+
+            <div class="modal-actions">
+
+
+                <button
+                    id="cancelRecordBtn"
+                    class="secondary"
+                    type="button"
+                >
+                    取消
+                </button>
+
+
+                <button
+                    class="primary"
+                    type="submit"
+                >
+                    儲存
+                </button>
+
+
+            </div>
+
+
+        </form>
+
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     里程 Modal
+========================================================== -->
+
+<div
+    id="mileageModal"
+    class="modal"
+>
+
+
+    <div class="modal-content">
+
+
+        <div class="modal-header">
+
+            <h2 id="mileageModalTitle">
+                新增里程
+            </h2>
+
+
+            <button
+                id="closeMileageModal"
+                class="close-btn"
+                type="button"
+                aria-label="關閉"
+            >
+                ✕
+            </button>
+
+        </div>
+
+
+        <form id="mileageForm">
+
+
+            <input
+                id="mileageId"
+                type="hidden"
+            >
+
+
+            <div class="form-grid">
+
+
+                <div class="form-group">
+
+                    <label for="mileageDate">
+                        日期
+                    </label>
+
+                    <input
+                        id="mileageDate"
+                        type="date"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="mileageKmInput">
+                        公里數
+                    </label>
+
+                    <input
+                        id="mileageKmInput"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="mileageRate">
+                        公司補助／公里
+                    </label>
+
+                    <input
+                        id="mileageRate"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value="6"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="mileageWearRate">
+                        每公里損耗
+                    </label>
+
+                    <input
+                        id="mileageWearRate"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        placeholder="例如 2.3"
+                    >
+
+
+                    <div class="hint">
+                        有填寫時：公里 × 每公里損耗
+                    </div>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="mileageWearInput">
+                        固定損耗
+                    </label>
+
+                    <input
+                        id="mileageWearInput"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value="0"
+                    >
+
+
+                    <div class="hint">
+                        未設定每公里損耗時使用
+                    </div>
+
+                </div>
+
+
+                <div class="form-group full">
+
+                    <label for="mileageNote">
+                        備註
+                    </label>
+
+                    <textarea
+                        id="mileageNote"
+                        placeholder="例如：台中 → 豐原"
+                    ></textarea>
+
+                </div>
+
+
+            </div>
+
+
+            <div
+                id="mileagePreview"
+                class="preview"
+            ></div>
+
+
+            <div class="modal-actions">
+
+
+                <button
+                    id="cancelMileageBtn"
+                    class="secondary"
+                    type="button"
+                >
+                    取消
+                </button>
+
+
+                <button
+                    class="primary"
+                    type="submit"
+                >
+                    儲存
+                </button>
+
+
+            </div>
+
+
+        </form>
+
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     設定 Modal
+========================================================== -->
+
+<div
+    id="settingsModal"
+    class="modal"
+>
+
+
+    <div class="modal-content">
+
+
+        <div class="modal-header">
+
+            <h2>
+                薪資設定
+            </h2>
+
+
+            <button
+                id="closeSettingsModal"
+                class="close-btn"
+                type="button"
+                aria-label="關閉"
+            >
+                ✕
+            </button>
+
+        </div>
+
+
+        <form id="settingsForm">
+
+
+            <div class="form-grid">
+
+
+                <div class="form-group full">
+
+                    <label for="salary">
+                        月薪
+                    </label>
+
+                    <input
+                        id="salary"
+                        type="number"
+                        min="0"
+                        step="1"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="normalStart">
+                        正常上班
+                    </label>
+
+                    <input
+                        id="normalStart"
+                        type="time"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="normalEnd">
+                        正常下班
+                    </label>
+
+                    <input
+                        id="normalEnd"
+                        type="time"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="overtimeStart">
+                        平日加班開始
+                    </label>
+
+                    <input
+                        id="overtimeStart"
+                        type="time"
+                    >
+
+                </div>
+
+
+            </div>
+
+
+            <div class="modal-actions">
+
+
+                <button
+                    id="cancelSettingsBtn"
+                    class="secondary"
+                    type="button"
+                >
+                    取消
+                </button>
+
+
+                <button
+                    class="primary"
+                    type="submit"
+                >
+                    儲存設定
+                </button>
+
+
+            </div>
+
+
+        </form>
+
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     App JS
+========================================================== -->
+
+<script src="firebase-config.js"></script>
+<script type="module" src="firebase-sync.js"></script>
+<script src="app.js"></script>
+
+
+</body>
+
+</html>

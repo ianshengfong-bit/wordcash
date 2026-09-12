@@ -1,0 +1,25 @@
++rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /yaoSyncSpaces/{spaceId} {
+      allow get: if request.auth != null;
+      allow list: if false;
+      allow create, update: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+          'ciphertext',
+          'schemaVersion',
+          'clientId',
+          'clientUpdatedAt',
+          'updatedAt'
+        ])
+        && request.resource.data.ciphertext is string
+        && request.resource.data.ciphertext.size() < 900000
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.clientId is string
+        && request.resource.data.clientUpdatedAt is int;
+      allow delete: if false;
+    }
+  }
+}
+

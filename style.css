@@ -1,0 +1,1128 @@
+* {
+    box-sizing: border-box;
+}
+
+
+:root {
+
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans TC",
+        Arial,
+        sans-serif;
+
+    color: #111827;
+
+    background: #f3f4f6;
+
+}
+
+
+body {
+
+    margin: 0;
+
+    background: #f3f4f6;
+
+}
+
+
+button,
+input,
+select,
+textarea {
+
+    font: inherit;
+
+}
+
+
+button {
+
+    cursor: pointer;
+
+}
+
+
+.app {
+
+    max-width: 1050px;
+
+    margin: auto;
+
+    padding:
+        28px
+        18px
+        60px;
+
+}
+
+
+/* =====================================================
+   Header
+===================================================== */
+
+.topbar {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: flex-start;
+
+    margin-bottom: 24px;
+
+}
+
+
+.eyebrow {
+
+    font-size: 12px;
+
+    letter-spacing: 2px;
+
+    color: #6b7280;
+
+    font-weight: 700;
+
+}
+
+
+h1 {
+
+    margin:
+        4px
+        0;
+
+    font-size: 30px;
+
+}
+
+
+.topbar p {
+
+    margin:
+        4px
+        0;
+
+    color: #6b7280;
+
+}
+
+
+.icon-btn {
+
+    width: 44px;
+
+    height: 44px;
+
+    border: 0;
+
+    border-radius: 12px;
+
+    background: white;
+
+    font-size: 20px;
+
+    box-shadow:
+        0
+        2px
+        10px
+        #0000000d;
+
+}
+
+
+/* =====================================================
+   Cards
+===================================================== */
+
+.card {
+
+    background: white;
+
+    border-radius: 16px;
+
+    padding: 18px;
+
+    box-shadow:
+        0
+        2px
+        12px
+        #0000000a;
+
+}
+
+
+.summary-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(4, 1fr);
+
+    gap: 12px;
+
+    margin-bottom: 14px;
+
+}
+
+
+.secondary-summary {
+
+    margin-top: 0;
+
+}
+
+
+.card > span,
+.breakdown-grid span,
+.mileage-summary span {
+
+    display: block;
+
+    color: #6b7280;
+
+    font-size: 13px;
+
+}
+
+
+.card strong {
+
+    display: block;
+
+    font-size: 24px;
+
+    margin-top: 7px;
+
+}
+
+
+.highlight {
+
+    background: #111827;
+
+    color: white;
+
+}
+
+
+.highlight > span {
+
+    color: #cbd5e1;
+
+}
+
+
+/* =====================================================
+   Toolbar
+===================================================== */
+
+.toolbar {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    gap: 12px;
+
+    margin-bottom: 14px;
+
+}
+
+
+.month-control {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+}
+
+
+.month-control button {
+
+    width: 36px;
+
+    height: 36px;
+
+    border: 0;
+
+    border-radius: 9px;
+
+    background: #f3f4f6;
+
+    font-size: 22px;
+
+}
+
+
+#monthPicker {
+
+    border:
+        1px
+        solid
+        #e5e7eb;
+
+    border-radius: 9px;
+
+    padding:
+        8px
+        10px;
+
+    background: white;
+
+}
+
+
+.toolbar-actions {
+
+    display: flex;
+
+    gap: 8px;
+
+    flex-wrap: wrap;
+
+}
+
+
+/* =====================================================
+   Buttons
+===================================================== */
+
+.primary {
+
+    border: 0;
+
+    background: #111827;
+
+    color: white;
+
+    border-radius: 10px;
+
+    padding:
+        10px
+        16px;
+
+    font-weight: 700;
+
+}
+
+
+.secondary {
+
+    border:
+        1px
+        solid
+        #d1d5db;
+
+    background: white;
+
+    color: #374151;
+
+    border-radius: 10px;
+
+    padding:
+        10px
+        16px;
+
+}
+
+
+.danger {
+
+    border: 0;
+
+    background: #fee2e2;
+
+    color: #991b1b;
+
+    border-radius: 9px;
+
+    padding:
+        8px
+        12px;
+
+    font-weight: 700;
+
+}
+
+
+button:hover {
+
+    opacity: 0.88;
+
+}
+
+
+/* =====================================================
+   Section
+===================================================== */
+
+.section-title {
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+}
+
+
+.section-title h2 {
+
+    margin: 0;
+
+    font-size: 18px;
+
+}
+
+
+.section-title span {
+
+    color: #6b7280;
+
+    font-size: 13px;
+
+}
+
+
+.list-title {
+
+    margin:
+        20px
+        0
+        10px;
+
+}
+
+
+.mileage-section-title {
+
+    margin-top: 28px;
+
+}
+
+
+/* =====================================================
+   Breakdown
+===================================================== */
+
+.breakdown-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(4, 1fr);
+
+    gap: 12px;
+
+}
+
+
+.breakdown-grid div {
+
+    background: #f9fafb;
+
+    border-radius: 10px;
+
+    padding: 13px;
+
+}
+
+
+.breakdown-grid b {
+
+    display: block;
+
+    margin-top: 5px;
+
+}
+
+
+.hint {
+
+    margin:
+        14px
+        0
+        0;
+
+    color: #6b7280;
+
+    font-size: 12px;
+
+}
+
+
+/* =====================================================
+   Record
+===================================================== */
+
+.record {
+
+    background: white;
+
+    border-radius: 16px;
+
+    padding: 17px;
+
+    margin-bottom: 10px;
+
+    box-shadow:
+        0
+        2px
+        12px
+        #0000000a;
+
+}
+
+
+.record-head {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    gap: 10px;
+
+}
+
+
+.date-big {
+
+    font-size: 17px;
+
+    font-weight: 800;
+
+}
+
+
+.type {
+
+    font-size: 12px;
+
+    color: #6b7280;
+
+    margin-top: 3px;
+
+}
+
+
+.pay {
+
+    font-size: 19px;
+
+    font-weight: 800;
+
+    text-align: right;
+
+}
+
+
+.record-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(4, 1fr);
+
+    gap: 10px;
+
+    margin-top: 14px;
+
+}
+
+
+.metric {
+
+    background: #f9fafb;
+
+    border-radius: 9px;
+
+    padding: 10px;
+
+}
+
+
+.metric small {
+
+    display: block;
+
+    color: #6b7280;
+
+}
+
+
+.metric b {
+
+    display: block;
+
+    margin-top: 4px;
+
+}
+
+
+.record-note {
+
+    margin:
+        12px
+        0
+        0;
+
+    padding-top: 10px;
+
+    border-top:
+        1px
+        solid
+        #f0f0f0;
+
+    color: #4b5563;
+
+    font-size: 13px;
+
+}
+
+
+.record-actions {
+
+    margin-top: 12px;
+
+    display: flex;
+
+    gap: 8px;
+
+}
+
+
+.record-actions button {
+
+    border: 0;
+
+    background: #f3f4f6;
+
+    border-radius: 8px;
+
+    padding:
+        7px
+        11px;
+
+    color: #374151;
+
+}
+
+
+/* =====================================================
+   Empty
+===================================================== */
+
+.empty {
+
+    text-align: center;
+
+    padding:
+        45px
+        20px;
+
+}
+
+
+.empty > div {
+
+    font-size: 32px;
+
+}
+
+
+.empty h3 {
+
+    margin:
+        10px
+        0
+        4px;
+
+}
+
+
+.empty p {
+
+    color: #6b7280;
+
+    margin-bottom: 18px;
+
+}
+
+
+/* =====================================================
+   Mileage
+===================================================== */
+
+.mileage-summary {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(3, 1fr);
+
+    gap: 12px;
+
+    margin-bottom: 12px;
+
+}
+
+
+.mileage-summary > div {
+
+    background: #f9fafb;
+
+    border-radius: 10px;
+
+    padding: 13px;
+
+}
+
+
+.mileage-summary b {
+
+    display: block;
+
+    margin-top: 5px;
+
+    font-size: 18px;
+
+}
+
+
+/* =====================================================
+   Data Management
+===================================================== */
+
+.data-management {
+
+    margin-top: 28px;
+
+}
+
+
+.data-buttons {
+
+    display: flex;
+
+    gap: 8px;
+
+    flex-wrap: wrap;
+
+    margin-top: 16px;
+
+}
+
+
+.danger-zone {
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 12px;
+
+    margin-top: 12px;
+
+    padding:
+        12px;
+
+    border-radius: 10px;
+
+    background: #fff7f7;
+
+}
+
+
+.danger-zone div {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 3px;
+
+}
+
+
+.danger-zone span {
+
+    font-size: 12px;
+
+    color: #6b7280;
+
+}
+
+
+/* =====================================================
+   Modal
+===================================================== */
+
+.modal-backdrop {
+
+    position: fixed;
+
+    inset: 0;
+
+    background:
+        #11182799;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 16px;
+
+    z-index: 10;
+
+}
+
+
+.hidden {
+
+    display: none !important;
+
+}
+
+
+.modal {
+
+    background: white;
+
+    width:
+        min(520px, 100%);
+
+    max-height: 92vh;
+
+    overflow: auto;
+
+    border-radius: 18px;
+
+    padding: 20px;
+
+}
+
+
+.modal-head {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    margin-bottom: 16px;
+
+}
+
+
+.modal-head h2 {
+
+    margin: 0;
+
+}
+
+
+.close {
+
+    border: 0;
+
+    background: #f3f4f6;
+
+    border-radius: 9px;
+
+    width: 36px;
+
+    height: 36px;
+
+    font-size: 24px;
+
+}
+
+
+/* =====================================================
+   Form
+===================================================== */
+
+label {
+
+    display: block;
+
+    font-weight: 700;
+
+    font-size: 14px;
+
+    margin:
+        13px
+        0;
+
+}
+
+
+input,
+select,
+textarea {
+
+    width: 100%;
+
+    margin-top: 7px;
+
+    border:
+        1px
+        solid
+        #d1d5db;
+
+    border-radius: 9px;
+
+    padding: 10px;
+
+    background: white;
+
+}
+
+
+.two {
+
+    display: grid;
+
+    grid-template-columns:
+        1fr
+        1fr;
+
+    gap: 12px;
+
+}
+
+
+.preview {
+
+    background: #f9fafb;
+
+    border-radius: 12px;
+
+    padding: 13px;
+
+    margin-top: 14px;
+
+}
+
+
+.preview strong {
+
+    font-size: 18px;
+
+}
+
+
+.rule-box {
+
+    background: #f9fafb;
+
+    border-radius: 12px;
+
+    padding: 14px;
+
+    margin-top: 14px;
+
+}
+
+
+.rule-box p {
+
+    margin:
+        6px
+        0;
+
+}
+
+
+.rule-box small {
+
+    color: #6b7280;
+
+}
+
+
+.form-actions {
+
+    display: flex;
+
+    justify-content: flex-end;
+
+    gap: 8px;
+
+    margin-top: 18px;
+
+}
+
+
+/* =====================================================
+   Mobile
+===================================================== */
+
+@media (max-width: 760px) {
+
+
+    .app {
+
+        padding:
+            20px
+            12px
+            50px;
+
+    }
+
+
+    .summary-grid {
+
+        grid-template-columns:
+            1fr
+            1fr;
+
+    }
+
+
+    .breakdown-grid {
+
+        grid-template-columns:
+            1fr
+            1fr;
+
+    }
+
+
+    .record-grid {
+
+        grid-template-columns:
+            1fr
+            1fr;
+
+    }
+
+
+    .mileage-summary {
+
+        grid-template-columns:
+            1fr;
+
+    }
+
+
+    .toolbar {
+
+        align-items: stretch;
+
+        flex-direction: column;
+
+    }
+
+
+    .month-control {
+
+        justify-content: center;
+
+    }
+
+
+    .toolbar-actions {
+
+        width: 100%;
+
+    }
+
+
+    .toolbar-actions button {
+
+        flex: 1;
+
+    }
+
+
+    .danger-zone {
+
+        align-items: stretch;
+
+        flex-direction: column;
+
+    }
+
+
+}
+
+
+@media (max-width: 430px) {
+
+
+    h1 {
+
+        font-size: 25px;
+
+    }
+
+
+    .topbar {
+
+        gap: 10px;
+
+    }
+
+
+    .record-head {
+
+        flex-direction: column;
+
+    }
+
+
+    .pay {
+
+        text-align: left;
+
+    }
+
+
+    .two {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .summary-grid {
+
+        grid-template-columns:
+            1fr
+            1fr;
+
+    }
+
+
+    .card strong {
+
+        font-size: 20px;
+
+    }
+
+
+    .toolbar-actions {
+
+        flex-direction: column;
+
+    }
+
+
+}
