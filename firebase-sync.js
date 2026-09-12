@@ -1,974 +1,1469 @@
-```js
 /*
- * YAO 加班費計算器：無帳密雲端同步
- *
- * 載入前，頁面必須先設定 window.YAO_FIREBASE_CONFIG，
- * 並提供 window.YaoCloudDataBridge.getData() / setData(data)。
- */
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+* YAO 加班費計算器
+* Firebase 無帳密雲端同步
+*
+* 功能：
+* 1. Firebase Anonymous Authentication
+* 2. Firestore 雲端資料同步
+* 3. 使用 24 碼同步碼連接不同裝置
+* 4. AES-GCM 加密同步資料
+* 5. 電腦與手機即時同步
+* 6. 與 app.js 的 YaoCloudDataBridge 相容
+*
+* 前置條件：
+* index.html 必須先載入：
+*
+* <script src="firebase-config.js"></script>
+* <script type="module" src="firebase-sync.js"></script>
+* <script src="app.js"></script>
+
+*/
 
 import {
-    getAuth,
-    signInAnonymously
+initializeApp
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+
+import {
+getAuth,
+signInAnonymously
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 import {
-    getFirestore,
-    doc,
-    getDoc,
-    onSnapshot,
-    serverTimestamp,
-    setDoc
+getFirestore,
+doc,
+getDoc,
+setDoc,
+onSnapshot,
+serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-
-const CONNECTION_KEY = "YAO_CLOUD_CONNECTION_V1";
-const CLIENT_KEY = "YAO_CLOUD_CLIENT_V1";
-const COLLECTION = "yaoSyncSpaces";
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-let db;
-let auth;
-
-let connection =
-    readJSON(
-        CONNECTION_KEY,
-        null
-    );
-
-let unsubscribe = null;
-let modal = null;
-let statusEl = null;
-let activeSpace = null;
-let syncing = false;
-
-
 /* =========================================================
-   LOCAL STORAGE
+CONSTANTS
 ========================================================= */
 
-function readJSON(key, fallback) {
+const CONNECTION_KEY =
+"YAO_CLOUD_CONNECTION_V1";
 
-    try {
+const CLIENT_KEY =
+"YAO_CLOUD_CLIENT_V1";
 
-        const value =
-            localStorage.getItem(key);
+const COLLECTION =
+"yaoSyncSpaces";
 
-        return value
-            ? JSON.parse(value)
-            : fallback;
+const SYNC_CODE_LENGTH = 24;
 
-    } catch {
+const encoder =
+new TextEncoder();
+
+const decoder =
+new TextDecoder();
+
+/* =========================================================
+STATE
+========================================================= */
+
+let db = null;
+let auth = null;
+
+let connection =
+readJSON(
+CONNECTION_KEY,
+null
+);
+
+let activeSpace = null;
+
+let unsubscribe =
+null;
+
+let modal =
+null;
+
+let launcher =
+null;
+
+let statusText =
+"尚未啟用同步";
+
+let statusState =
+"idle";
+
+let syncing =
+false;
+
+let pushTimer =
+null;
+
+/* =========================================================
+LOCAL STORAGE
+========================================================= */
+
+function readJSON(
+key,
+fallback
+) {
+
+try {
+
+    const value =
+        localStorage.getItem(key);
+
+    if (!value) {
 
         return fallback;
 
     }
 
+    return JSON.parse(value);
+
+} catch (error) {
+
+    console.warn(
+        "YAO Cloud Sync：讀取 LocalStorage 失敗",
+        error
+    );
+
+    return fallback;
+
 }
 
+}
 
-function writeJSON(key, value) {
+function writeJSON(
+key,
+value
+) {
+
+try {
 
     localStorage.setItem(
         key,
         JSON.stringify(value)
     );
 
+} catch (error) {
+
+    console.warn(
+        "YAO Cloud Sync：寫入 LocalStorage 失敗",
+        error
+    );
+
 }
 
+}
 
 /* =========================================================
-   DATA BRIDGE
+APP DATA BRIDGE
 ========================================================= */
 
-function bridge() {
+function getBridge() {
 
-    return window.YaoCloudDataBridge;
+return window.YaoCloudDataBridge;
 
 }
 
-
 /* =========================================================
-   STATUS
+STATUS
 ========================================================= */
 
 function setStatus(
-    text,
-    state = "idle"
+text,
+state = "idle"
 ) {
 
-    if (statusEl) {
+statusText =
+    text;
 
-        statusEl.textContent = text;
-        statusEl.dataset.state = state;
+statusState =
+    state;
 
-    }
+if (launcher) {
 
-    window.dispatchEvent(
-        new CustomEvent(
-            "yao-sync-status",
-            {
-                detail: {
-                    text,
-                    state
-                }
+    launcher.dataset.state =
+        state;
+
+    launcher.title =
+        `YAO 雲端同步：${text}`;
+
+}
+
+window.dispatchEvent(
+    new CustomEvent(
+        "yao-sync-status",
+        {
+            detail: {
+                text,
+                state
             }
+        }
+    )
+);
+
+}
+
+/* =========================================================
+FIREBASE CONFIG
+========================================================= */
+
+function isFirebaseConfigured() {
+
+const config =
+    window.YAO_FIREBASE_CONFIG;
+
+return Boolean(
+    config &&
+    config.apiKey &&
+    config.authDomain &&
+    config.projectId &&
+    config.appId
+);
+
+}
+
+/* =========================================================
+SYNC CODE
+========================================================= */
+
+function normaliseCode(
+value
+) {
+
+return String(
+    value || ""
+)
+    .toUpperCase()
+    .replace(
+        /[^A-Z2-9]/g,
+        ""
+    )
+    .replace(
+        /[01ILO]/g,
+        "");
+
+}
+
+function displayCode(
+value
+) {
+
+const clean =
+    normaliseCode(
+        value
+    );
+
+const groups =
+    clean.match(
+        /.{1,4}/g
+    );
+
+return groups
+    ? groups.join("-")
+    : "";
+
+}
+
+function generateSyncCode() {
+
+const alphabet =
+    "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+const bytes =
+    crypto.getRandomValues(
+        new Uint8Array(
+            SYNC_CODE_LENGTH
         )
     );
 
+let result =
+    "";
+
+for (
+    let i = 0;
+    i < bytes.length;
+    i++
+) {
+
+    result +=
+        alphabet[
+            bytes[i] %
+            alphabet.length
+        ];
+
 }
 
+return result;
+
+}
 
 /* =========================================================
-   FIREBASE CONFIG
-========================================================= */
-
-function configured() {
-
-    const config =
-        window.YAO_FIREBASE_CONFIG;
-
-    return Boolean(
-        config &&
-        config.apiKey &&
-        config.projectId &&
-        config.appId
-    );
-
-}
-
-
-/* =========================================================
-   SYNC CODE
-========================================================= */
-
-function normaliseCode(value) {
-
-    return String(value || "")
-        .toUpperCase()
-        .replace(/[^A-Z2-9]/g, "")
-        .replace(/[01ILO]/g, "");
-
-}
-
-
-function displayCode(value) {
-
-    return (
-        normaliseCode(value)
-            .match(/.{1,4}/g)
-            ?.join("-")
-        || ""
-    );
-
-}
-
-
-function generateCode() {
-
-    const alphabet =
-        "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-    const values =
-        crypto.getRandomValues(
-            new Uint8Array(24)
-        );
-
-    return Array.from(
-        values,
-        value =>
-            alphabet[
-                value % alphabet.length
-            ]
-    ).join("");
-
-}
-
-
-/* =========================================================
-   CLIENT ID
+CLIENT ID
 ========================================================= */
 
 function getClientId() {
 
-    let clientId =
-        localStorage.getItem(
-            CLIENT_KEY
+let clientId =
+    localStorage.getItem(
+        CLIENT_KEY
+    );
+
+if (!clientId) {
+
+    clientId =
+        crypto.randomUUID();
+
+    localStorage.setItem(
+        CLIENT_KEY,
+        clientId
+    );
+
+}
+
+return clientId;
+
+}
+
+/* =========================================================
+BASE64
+========================================================= */
+
+function bytesToBase64(
+bytes
+) {
+
+let binary =
+    "";
+
+for (
+    let i = 0;
+    i < bytes.length;
+    i++
+) {
+
+    binary +=
+        String.fromCharCode(
+            bytes[i]
         );
 
-    if (!clientId) {
+}
 
-        clientId =
-            crypto.randomUUID();
+return btoa(
+    binary
+);
 
-        localStorage.setItem(
-            CLIENT_KEY,
-            clientId
-        );
+}
 
+function base64ToBytes(
+value
+) {
+
+const binary =
+    atob(value);
+
+const bytes =
+    new Uint8Array(
+        binary.length
+    );
+
+for (
+    let i = 0;
+    i < binary.length;
+    i++
+) {
+
+    bytes[i] =
+        binary.charCodeAt(i);
+
+}
+
+return bytes;
+
+}
+
+/* =========================================================
+HASH
+========================================================= */
+
+async function sha256(
+value
+) {
+
+const digest =
+    await crypto.subtle.digest(
+        "SHA-256",
+        encoder.encode(value)
+    );
+
+return new Uint8Array(
+    digest
+);
+
+}
+
+/* =========================================================
+FIRESTORE SPACE ID
+========================================================= */
+
+async function getSpaceId(
+code
+) {
+
+const digest =
+    await sha256(
+        `YAO-space-v1:${code}`
+    );
+
+return bytesToBase64(
+    digest
+)
+    .replace(
+        /\+/g,
+        "-"
+    )
+    .replace(
+        /\//g,
+        "_"
+    )
+    .replace(
+        /=/g,
+        ""
+    );
+
+}
+
+/* =========================================================
+AES KEY
+========================================================= */
+
+async function getEncryptionKey(
+code
+) {
+
+const keyMaterial =
+    await sha256(
+        `YAO-data-v1:${code}`
+    );
+
+return crypto.subtle.importKey(
+    "raw",
+    keyMaterial,
+    {
+        name: "AES-GCM"
+    },
+    false,
+    [
+        "encrypt",
+        "decrypt"
+    ]
+);
+
+}
+
+/* =========================================================
+ENCRYPT
+========================================================= */
+
+async function encryptData(
+data,
+code
+) {
+
+const key =
+    await getEncryptionKey(
+        code
+    );
+
+const iv =
+    crypto.getRandomValues(
+        new Uint8Array(12)
+    );
+
+const plaintext =
+    encoder.encode(
+        JSON.stringify(data)
+    );
+
+const encrypted =
+    await crypto.subtle.encrypt(
+        {
+            name: "AES-GCM",
+            iv
+        },
+        key,
+        plaintext
+    );
+
+return JSON.stringify(
+    {
+        v: 1,
+        i: bytesToBase64(
+            iv
+        ),
+        c: bytesToBase64(
+            new Uint8Array(
+                encrypted
+            )
+        )
     }
-
-    return clientId;
+);
 
 }
-
 
 /* =========================================================
-   BASE64
+DECRYPT
 ========================================================= */
 
-function toBase64(bytes) {
+async function decryptData(
+payload,
+code
+) {
 
-    let result = "";
+let packed;
 
-    bytes.forEach(
-        byte => {
+try {
 
-            result +=
-                String.fromCharCode(byte);
+    packed =
+        JSON.parse(
+            payload
+        );
 
-        }
-    );
+} catch {
 
-    return btoa(result);
-
-}
-
-
-function fromBase64(value) {
-
-    const binary =
-        atob(value);
-
-    return Uint8Array.from(
-        binary,
-        char =>
-            char.charCodeAt(0)
+    throw new Error(
+        "同步資料格式錯誤"
     );
 
 }
 
+if (
+    !packed ||
+    packed.v !== 1 ||
+    !packed.i ||
+    !packed.c
+) {
 
-/* =========================================================
-   HASH
-========================================================= */
+    throw new Error(
+        "同步資料格式不正確"
+    );
 
-async function sha256(value) {
+}
 
-    return new Uint8Array(
-        await crypto.subtle.digest(
-            "SHA-256",
-            encoder.encode(value)
+const key =
+    await getEncryptionKey(
+        code
+    );
+
+const decrypted =
+    await crypto.subtle.decrypt(
+        {
+            name: "AES-GCM",
+            iv: base64ToBytes(
+                packed.i
+            )
+        },
+        key,
+        base64ToBytes(
+            packed.c
         )
     );
 
-}
-
-
-async function spaceIdFor(code) {
-
-    const digest =
-        await sha256(
-            `YAO-space-v1:${code}`
-        );
-
-    return toBase64(digest)
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=/g, "");
+return JSON.parse(
+    decoder.decode(
+        decrypted
+    )
+);
 
 }
-
 
 /* =========================================================
-   AES KEY
+DATA CLEANUP
 ========================================================= */
 
-async function encryptionKeyFor(code) {
-
-    const material =
-        await crypto.subtle.importKey(
-            "raw",
-            await sha256(
-                `YAO-data-v1:${code}`
-            ),
-            "AES-GCM",
-            false,
-            [
-                "encrypt",
-                "decrypt"
-            ]
-        );
-
-    return material;
-
-}
-
-
-/* =========================================================
-   ENCRYPT
-========================================================= */
-
-async function encrypt(
-    data,
-    code
+function cleanData(
+data
 ) {
 
-    const iv =
-        crypto.getRandomValues(
-            new Uint8Array(12)
-        );
+const source =
+    data &&
+    typeof data === "object"
+        ? data
+        : {};
 
-    const key =
-        await encryptionKeyFor(code);
+return {
 
-    const plain =
-        encoder.encode(
-            JSON.stringify(data)
-        );
+    records:
+        Array.isArray(
+            source.records
+        )
+            ? source.records
+            : [],
 
-    const ciphertext =
-        new Uint8Array(
-            await crypto.subtle.encrypt(
-                {
-                    name: "AES-GCM",
-                    iv
-                },
-                key,
-                plain
-            )
-        );
+    mileageRecords:
+        Array.isArray(
+            source.mileageRecords
+        )
+            ? source.mileageRecords
+            : [],
 
-    return JSON.stringify(
-        {
-            v: 1,
-            i: toBase64(iv),
-            c: toBase64(ciphertext)
-        }
-    );
+    settings:
+        source.settings &&
+        typeof source.settings === "object"
+            ? source.settings
+            : {}
+
+};
 
 }
 
-
 /* =========================================================
-   DECRYPT
-========================================================= */
-
-async function decrypt(
-    payload,
-    code
-) {
-
-    const packed =
-        JSON.parse(payload);
-
-    if (
-        packed.v !== 1 ||
-        !packed.i ||
-        !packed.c
-    ) {
-
-        throw new Error(
-            "同步資料格式不正確"
-        );
-
-    }
-
-    const key =
-        await encryptionKeyFor(code);
-
-    const plain =
-        await crypto.subtle.decrypt(
-            {
-                name: "AES-GCM",
-                iv: fromBase64(
-                    packed.i
-                )
-            },
-            key,
-            fromBase64(
-                packed.c
-            )
-        );
-
-    return JSON.parse(
-        decoder.decode(plain)
-    );
-
-}
-
-
-/* =========================================================
-   DATA CLEAN
-========================================================= */
-
-function cleanData(data) {
-
-    return {
-
-        records:
-            Array.isArray(
-                data?.records
-            )
-                ? data.records
-                : [],
-
-        mileageRecords:
-            Array.isArray(
-                data?.mileageRecords
-            )
-                ? data.mileageRecords
-                : [],
-
-        settings:
-            data?.settings &&
-            typeof data.settings === "object"
-                ? data.settings
-                : {}
-
-    };
-
-}
-
-
-/* =========================================================
-   FIREBASE INIT
+FIREBASE INITIALIZATION
 ========================================================= */
 
 async function ensureFirebase() {
 
-    if (!configured()) {
+if (
+    !isFirebaseConfigured()
+) {
 
-        throw new Error(
-            "尚未設定 Firebase"
-        );
-
-    }
-
-    if (!db) {
-
-        const app =
-            initializeApp(
-                window.YAO_FIREBASE_CONFIG
-            );
-
-        db =
-            getFirestore(app);
-
-        auth =
-            getAuth(app);
-
-        await signInAnonymously(
-            auth
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   FIRESTORE REF
-========================================================= */
-
-function remoteRef() {
-
-    return doc(
-        db,
-        COLLECTION,
-        activeSpace.id
+    throw new Error(
+        "找不到 Firebase 設定。請確認 firebase-config.js 已正確放在 index.html 同一層。"
     );
 
 }
 
+if (
+    db &&
+    auth
+) {
+
+    return;
+
+}
+
+const app =
+    initializeApp(
+        window.YAO_FIREBASE_CONFIG
+    );
+
+db =
+    getFirestore(
+        app
+    );
+
+auth =
+    getAuth(
+        app
+    );
+
+if (
+    !auth.currentUser
+) {
+
+    await signInAnonymously(
+        auth
+    );
+
+}
+
+}
 
 /* =========================================================
-   SAVE CONNECTION
+FIRESTORE REFERENCE
+========================================================= */
+
+function getRemoteRef() {
+
+if (!db) {
+
+    throw new Error(
+        "Firebase 尚未初始化"
+    );
+
+}
+
+if (
+    !activeSpace ||
+    !activeSpace.id
+) {
+
+    throw new Error(
+        "目前沒有連接同步空間"
+    );
+
+}
+
+return doc(
+    db,
+    COLLECTION,
+    activeSpace.id
+);
+
+}
+
+/* =========================================================
+SAVE CONNECTION
 ========================================================= */
 
 function saveConnection(
-    code,
-    id
+code,
+id
 ) {
 
-    connection = {
-        code,
-        id,
-        connectedAt: Date.now()
-    };
+const data = {
 
-    writeJSON(
-        CONNECTION_KEY,
-        connection
-    );
+    code,
+    id,
 
-    activeSpace =
-        connection;
+    connectedAt:
+        Date.now()
+
+};
+
+connection =
+    data;
+
+activeSpace =
+    data;
+
+writeJSON(
+    CONNECTION_KEY,
+    data
+);
 
 }
 
+/* =========================================================
+REMOVE CONNECTION
+========================================================= */
+
+function removeConnection() {
+
+unsubscribe?.();
+
+unsubscribe =
+    null;
+
+activeSpace =
+    null;
+
+connection =
+    null;
+
+localStorage.removeItem(
+    CONNECTION_KEY
+);
+
+setStatus(
+    "尚未啟用同步",
+    "idle"
+);
+
+}
 
 /* =========================================================
-   UPLOAD
+GET CURRENT APP DATA
+========================================================= */
+
+function getCurrentAppData() {
+
+const app =
+    getBridge();
+
+if (
+    !app ||
+    typeof app.getData !== "function"
+) {
+
+    return cleanData(
+        null
+    );
+
+}
+
+return cleanData(
+    app.getData()
+);
+
+}
+
+/* =========================================================
+APPLY REMOTE DATA
+========================================================= */
+
+function applyRemoteData(
+data
+) {
+
+const app =
+    getBridge();
+
+if (
+    !app ||
+    typeof app.setData !== "function"
+) {
+
+    throw new Error(
+        "找不到 YaoCloudDataBridge.setData"
+    );
+
+}
+
+app.setData(
+    cleanData(
+        data
+    )
+);
+
+}
+
+/* =========================================================
+UPLOAD CURRENT DATA
 ========================================================= */
 
 async function uploadCurrentData() {
 
-    if (
-        !activeSpace ||
-        !bridge()?.getData
-    ) {
-
-        return;
-
-    }
-
-    syncing = true;
-
-    setStatus(
-        "正在同步…",
-        "working"
-    );
-
-    try {
-
-        const ciphertext =
-            await encrypt(
-                cleanData(
-                    bridge().getData()
-                ),
-                activeSpace.code
-            );
-
-        await setDoc(
-            remoteRef(),
-            {
-                ciphertext,
-                schemaVersion: 1,
-                clientId:
-                    getClientId(),
-                clientUpdatedAt:
-                    Date.now(),
-                updatedAt:
-                    serverTimestamp()
-            }
-        );
-
-        setStatus(
-            "已同步",
-            "ready"
-        );
-
-    } catch (error) {
-
-        console.error(
-            "YAO 同步失敗：",
-            error
-        );
-
-        setStatus(
-            "同步失敗",
-            "error"
-        );
-
-        throw error;
-
-    } finally {
-
-        syncing = false;
-
-    }
-
-}
-
-
-/* =========================================================
-   RECEIVE REMOTE DATA
-========================================================= */
-
-async function useRemoteData(
-    snapshot
+if (
+    !activeSpace
 ) {
 
-    if (
-        !snapshot.exists() ||
-        !snapshot.data().ciphertext ||
-        !bridge()?.setData
-    ) {
-
-        return;
-
-    }
-
-    try {
-
-        const incoming =
-            cleanData(
-                await decrypt(
-                    snapshot.data().ciphertext,
-                    activeSpace.code
-                )
-            );
-
-        bridge().setData(
-            incoming
-        );
-
-        setStatus(
-            "已同步",
-            "ready"
-        );
-
-    } catch (error) {
-
-        console.error(
-            "YAO 同步資料無法讀取：",
-            error
-        );
-
-        setStatus(
-            "同步碼不正確或資料無法讀取",
-            "error"
-        );
-
-    }
+    return;
 
 }
 
+if (
+    syncing
+) {
+
+    return;
+
+}
+
+const app =
+    getBridge();
+
+if (
+    !app ||
+    typeof app.getData !== "function"
+) {
+
+    return;
+
+}
+
+syncing =
+    true;
+
+setStatus(
+    "正在同步…",
+    "working"
+);
+
+try {
+
+    const data =
+        getCurrentAppData();
+
+    const ciphertext =
+        await encryptData(
+            data,
+            activeSpace.code
+        );
+
+    await setDoc(
+        getRemoteRef(),
+        {
+
+            ciphertext,
+
+            schemaVersion:
+                1,
+
+            clientId:
+                getClientId(),
+
+            clientUpdatedAt:
+                Date.now(),
+
+            updatedAt:
+                serverTimestamp()
+
+        },
+        {
+            merge: true
+        }
+    );
+
+    setStatus(
+        "已同步",
+        "ready"
+    );
+
+} catch (error) {
+
+    console.error(
+        "YAO Cloud Sync upload error:",
+        error
+    );
+
+    setStatus(
+        "同步失敗",
+        "error"
+    );
+
+    throw error;
+
+} finally {
+
+    syncing =
+        false;
+
+}
+
+}
 
 /* =========================================================
-   REALTIME LISTENER
+SCHEDULE PUSH
+========================================================= */
+
+function schedulePush() {
+
+if (
+    !activeSpace
+) {
+
+    return;
+
+}
+
+if (
+    pushTimer
+) {
+
+    clearTimeout(
+        pushTimer
+    );
+
+}
+
+pushTimer =
+    setTimeout(
+        () => {
+
+            pushTimer =
+                null;
+
+            uploadCurrentData()
+                .catch(
+                    () => {}
+                );
+
+        },
+        350
+    );
+
+}
+
+/* =========================================================
+RECEIVE SNAPSHOT
+========================================================= */
+
+async function processSnapshot(
+snapshot
+) {
+
+if (
+    !snapshot.exists()
+) {
+
+    return;
+
+}
+
+const remoteData =
+    snapshot.data();
+
+if (
+    !remoteData ||
+    !remoteData.ciphertext
+) {
+
+    return;
+
+}
+
+try {
+
+    const decrypted =
+        await decryptData(
+            remoteData.ciphertext,
+            activeSpace.code
+        );
+
+    applyRemoteData(
+        decrypted
+    );
+
+    setStatus(
+        "已同步",
+        "ready"
+    );
+
+} catch (error) {
+
+    console.error(
+        "YAO Cloud Sync decrypt error:",
+        error
+    );
+
+    setStatus(
+        "同步碼錯誤或雲端資料無法讀取",
+        "error"
+    );
+
+}
+
+}
+
+/* =========================================================
+REALTIME LISTENER
 ========================================================= */
 
 function listenToRemote() {
 
-    if (unsubscribe) {
+unsubscribe?.();
 
-        unsubscribe();
+unsubscribe =
+    null;
 
-    }
+if (
+    !activeSpace
+) {
+
+    return;
+
+}
+
+try {
+
+    const ref =
+        getRemoteRef();
 
     unsubscribe =
         onSnapshot(
-            remoteRef(),
-
+            ref,
             snapshot => {
 
-                useRemoteData(
+                processSnapshot(
                     snapshot
                 );
 
             },
-
             error => {
 
                 console.error(
-                    "YAO 即時同步中斷：",
+                    "YAO Cloud Sync realtime error:",
                     error
                 );
 
                 setStatus(
-                    "目前無法連線",
+                    "雲端連線中斷",
                     "error"
                 );
 
             }
         );
 
-}
+} catch (error) {
 
-
-/* =========================================================
-   CREATE SPACE
-========================================================= */
-
-async function createSpace() {
-
-    await ensureFirebase();
-
-    const code =
-        generateCode();
-
-    const id =
-        await spaceIdFor(code);
-
-    activeSpace = {
-        code,
-        id
-    };
-
-    const snapshot =
-        await getDoc(
-            remoteRef()
-        );
-
-    if (snapshot.exists()) {
-
-        return createSpace();
-
-    }
-
-    saveConnection(
-        code,
-        id
+    console.error(
+        "YAO Cloud Sync listener error:",
+        error
     );
 
-    await uploadCurrentData();
-
-    listenToRemote();
-
-    showCodeScreen(
-        code,
-        true
+    setStatus(
+        "無法建立同步連線",
+        "error"
     );
 
 }
 
+}
 
 /* =========================================================
-   CONNECT SPACE
+CREATE NEW SPACE
 ========================================================= */
 
-async function connectSpace(
-    code
+async function createSyncSpace() {
+
+await ensureFirebase();
+
+setStatus(
+    "正在建立同步…",
+    "working"
+);
+
+let code = "";
+let id = "";
+let exists = true;
+
+let attempts = 0;
+
+while (
+    exists &&
+    attempts < 5
 ) {
 
-    await ensureFirebase();
+    attempts++;
 
-    const normalised =
-        normaliseCode(code);
+    code =
+        generateSyncCode();
 
-    if (
-        normalised.length < 20
-    ) {
-
-        throw new Error(
-            "請輸入完整的同步碼"
+    id =
+        await getSpaceId(
+            code
         );
 
-    }
-
-    const id =
-        await spaceIdFor(
-            normalised
+    const ref =
+        doc(
+            db,
+            COLLECTION,
+            id
         );
-
-    activeSpace = {
-        code: normalised,
-        id
-    };
 
     const snapshot =
         await getDoc(
-            remoteRef()
+            ref
         );
 
-    if (!snapshot.exists()) {
-
-        activeSpace = null;
-
-        throw new Error(
-            "找不到這組同步碼的資料。請確認輸入無誤。"
-        );
-
-    }
-
-    await useRemoteData(
-        snapshot
-    );
-
-    saveConnection(
-        normalised,
-        id
-    );
-
-    listenToRemote();
-
-    closeModal();
+    exists =
+        snapshot.exists();
 
 }
 
+if (exists) {
+
+    throw new Error(
+        "建立同步空間失敗，請再試一次。"
+    );
+
+}
+
+saveConnection(
+    code,
+    id
+);
+
+await uploadCurrentData();
+
+listenToRemote();
+
+showCreatedCode(
+    code
+);
+
+}
 
 /* =========================================================
-   RESTORE CONNECTION
+CONNECT EXISTING SPACE
+========================================================= */
+
+async function connectToSpace(
+inputCode
+) {
+
+await ensureFirebase();
+
+const code =
+    normaliseCode(
+        inputCode
+    );
+
+if (
+    code.length !==
+    SYNC_CODE_LENGTH
+) {
+
+    throw new Error(
+        "同步碼格式不正確，請輸入完整的 24 碼同步碼。"
+    );
+
+}
+
+setStatus(
+    "正在連接雲端…",
+    "working"
+);
+
+const id =
+    await getSpaceId(
+        code
+    );
+
+activeSpace = {
+    code,
+    id
+};
+
+const snapshot =
+    await getDoc(
+        getRemoteRef()
+    );
+
+if (
+    !snapshot.exists()
+) {
+
+    activeSpace =
+        null;
+
+    throw new Error(
+        "找不到這組同步碼，請確認同步碼是否正確。"
+    );
+
+}
+
+await processSnapshot(
+    snapshot
+);
+
+saveConnection(
+    code,
+    id
+);
+
+listenToRemote();
+
+closeModal();
+
+setStatus(
+    "已同步",
+    "ready"
+);
+
+}
+
+/* =========================================================
+RESTORE CONNECTION
 ========================================================= */
 
 async function restoreConnection() {
 
-    if (!connection) {
+if (
+    !connection ||
+    !connection.code ||
+    !connection.id
+) {
 
-        setStatus(
-            "尚未啟用同步",
-            "idle"
-        );
-
-        return;
-
-    }
-
-    try {
-
-        await ensureFirebase();
-
-        activeSpace =
-            connection;
-
-        const snapshot =
-            await getDoc(
-                remoteRef()
-            );
-
-        if (!snapshot.exists()) {
-
-            throw new Error(
-                "雲端資料不存在"
-            );
-
-        }
-
-        await useRemoteData(
-            snapshot
-        );
-
-        listenToRemote();
-
-    } catch (error) {
-
-        console.error(
-            "YAO 同步連線失敗：",
-            error
-        );
-
-        setStatus(
-            "目前無法連線",
-            "error"
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   SCHEDULE PUSH
-========================================================= */
-
-function schedulePush() {
-
-    if (
-        !activeSpace ||
-        syncing
-    ) {
-
-        return;
-
-    }
-
-    window.clearTimeout(
-        schedulePush.timer
+    setStatus(
+        "尚未啟用同步",
+        "idle"
     );
 
-    schedulePush.timer =
-        window.setTimeout(
-            () => {
-
-                uploadCurrentData()
-                    .catch(
-                        () => {}
-                    );
-
-            },
-            350
-        );
+    return;
 
 }
 
+try {
+
+    await ensureFirebase();
+
+    activeSpace = {
+
+        code:
+            normaliseCode(
+                connection.code
+            ),
+
+        id:
+            connection.id
+
+    };
+
+    const expectedId =
+        await getSpaceId(
+            activeSpace.code
+        );
+
+    if (
+        expectedId !==
+        activeSpace.id
+    ) {
+
+        throw new Error(
+            "儲存的同步連線資料不正確"
+        );
+
+    }
+
+    const snapshot =
+        await getDoc(
+            getRemoteRef()
+        );
+
+    if (
+        !snapshot.exists()
+    ) {
+
+        throw new Error(
+            "雲端同步資料不存在"
+        );
+
+    }
+
+    await processSnapshot(
+        snapshot
+    );
+
+    listenToRemote();
+
+    setStatus(
+        "已同步",
+        "ready"
+    );
+
+} catch (error) {
+
+    console.warn(
+        "YAO Cloud Sync restore failed:",
+        error
+    );
+
+    setStatus(
+        "尚未連線",
+        "error"
+    );
+
+}
+
+}
 
 /* =========================================================
-   MODAL
+MODAL
 ========================================================= */
 
 function closeModal() {
 
-    modal?.remove();
+if (modal) {
 
-    modal = null;
+    modal.remove();
 
 }
 
+modal =
+    null;
+
+}
 
 /* =========================================================
-   CODE SCREEN
+CREATE MODAL
 ========================================================= */
 
-function showCodeScreen(
-    code,
-    created
+function createModal() {
+
+closeModal();
+
+modal =
+    document.createElement(
+        "div"
+    );
+
+modal.className =
+    "yao-sync-modal";
+
+modal.addEventListener(
+    "click",
+    event => {
+
+        if (
+            event.target ===
+            modal
+        ) {
+
+            closeModal();
+
+        }
+
+    }
+);
+
+document.body.appendChild(
+    modal
+);
+
+}
+
+/* =========================================================
+CREATED CODE SCREEN
+========================================================= */
+
+function showCreatedCode(
+code
 ) {
 
-    modal.innerHTML = `
+createModal();
 
-        <div
-            class="yao-sync-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label="YAO 同步碼"
+modal.innerHTML = `
+
+    <div
+        class="yao-sync-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="YAO 同步碼"
+    >
+
+        <button
+            type="button"
+            class="yao-sync-close"
+            data-close
+            aria-label="關閉"
         >
+            ×
+        </button>
 
-            <button
-                class="yao-sync-close"
-                type="button"
-                aria-label="關閉"
-            >
-                ×
-            </button>
-
-            <div class="yao-sync-icon">
-                ☁️
-            </div>
-
-            <h2>
-                ${created
-                    ? "同步已啟用"
-                    : "你的同步碼"}
-            </h2>
-
-            <p>
-                把這組碼留好；手機第一次開啟時輸入它，
-                就會看到同一份資料。
-            </p>
-
-            <output class="yao-sync-code">
-                ${displayCode(code)}
-            </output>
-
-            <button
-                class="yao-sync-primary"
-                type="button"
-                data-copy
-            >
-                複製同步碼
-            </button>
-
-            <p class="yao-sync-note">
-                這組碼也用來加密資料。不要傳給其他人。
-            </p>
-
+        <div class="yao-sync-icon">
+            ☁️
         </div>
-    `;
 
-    modal.querySelector(
-        ".yao-sync-close"
-    ).onclick =
-        closeModal;
+        <h2>
+            同步已啟用
+        </h2>
 
-    modal.querySelector(
-        "[data-copy]"
-    ).onclick =
-        async event => {
+        <p>
+            這是你的 YAO 同步碼。
+            手機第一次使用時輸入這組碼，
+            就可以看到同一份資料。
+        </p>
+
+        <div class="yao-sync-code">
+            ${displayCode(code)}
+        </div>
+
+        <button
+            type="button"
+            class="yao-sync-primary"
+            data-copy
+        >
+            複製同步碼
+        </button>
+
+        <p class="yao-sync-note">
+            請把同步碼保存好。同步碼也是資料加密金鑰的一部分。
+        </p>
+
+    </div>
+`;
+
+modal.querySelector(
+    "[data-close]"
+).onclick =
+    closeModal;
+
+modal.querySelector(
+    "[data-copy]"
+).onclick =
+    async event => {
+
+        try {
 
             await navigator.clipboard.writeText(
                 displayCode(code)
@@ -977,165 +1472,29 @@ function showCodeScreen(
             event.currentTarget.textContent =
                 "已複製";
 
-        };
+        } catch {
+
+            alert(
+                `同步碼：${displayCode(code)}`
+            );
+
+        }
+
+    };
 
 }
 
-
 /* =========================================================
-   MAIN SCREEN
+MAIN SETTINGS SCREEN
 ========================================================= */
 
-function showMainScreen() {
+function showSettings() {
 
-    if (!configured()) {
+createModal();
 
-        modal.innerHTML = `
-
-            <div
-                class="yao-sync-card"
-                role="dialog"
-                aria-modal="true"
-                aria-label="設定同步"
-            >
-
-                <button
-                    class="yao-sync-close"
-                    type="button"
-                    aria-label="關閉"
-                >
-                    ×
-                </button>
-
-                <div class="yao-sync-icon">
-                    ⚙️
-                </div>
-
-                <h2>
-                    還差雲端設定
-                </h2>
-
-                <p>
-                    請先把 Firebase Web App 的設定貼進
-                    <code>firebase-config.js</code>。
-                    完成後，這裡就能建立同步碼。
-                </p>
-
-            </div>
-        `;
-
-        modal.querySelector(
-            ".yao-sync-close"
-        ).onclick =
-            closeModal;
-
-        return;
-
-    }
-
-
-    if (connection) {
-
-        modal.innerHTML = `
-
-            <div
-                class="yao-sync-card"
-                role="dialog"
-                aria-modal="true"
-                aria-label="同步設定"
-            >
-
-                <button
-                    class="yao-sync-close"
-                    type="button"
-                    aria-label="關閉"
-                >
-                    ×
-                </button>
-
-                <div class="yao-sync-icon">
-                    ☁️
-                </div>
-
-                <h2>
-                    這台裝置已連接
-                </h2>
-
-                <p>
-                    電腦與手機的新增、修改、刪除會自動同步。
-                </p>
-
-                <button
-                    class="yao-sync-primary"
-                    type="button"
-                    data-show-code
-                >
-                    顯示同步碼
-                </button>
-
-                <button
-                    class="yao-sync-text"
-                    type="button"
-                    data-disconnect
-                >
-                    停止在這台裝置同步
-                </button>
-
-            </div>
-        `;
-
-        modal.querySelector(
-            ".yao-sync-close"
-        ).onclick =
-            closeModal;
-
-        modal.querySelector(
-            "[data-show-code]"
-        ).onclick =
-            () =>
-                showCodeScreen(
-                    connection.code,
-                    false
-                );
-
-        modal.querySelector(
-            "[data-disconnect]"
-        ).onclick =
-            () => {
-
-                if (
-                    !confirm(
-                        "只會中斷這台裝置；雲端資料不會刪除。"
-                    )
-                ) {
-                    return;
-                }
-
-                unsubscribe?.();
-
-                unsubscribe = null;
-
-                activeSpace = null;
-
-                connection = null;
-
-                localStorage.removeItem(
-                    CONNECTION_KEY
-                );
-
-                setStatus(
-                    "尚未啟用同步",
-                    "idle"
-                );
-
-                closeModal();
-
-            };
-
-        return;
-
-    }
-
+if (
+    !isFirebaseConfigured()
+) {
 
     modal.innerHTML = `
 
@@ -1143,12 +1502,62 @@ function showMainScreen() {
             class="yao-sync-card"
             role="dialog"
             aria-modal="true"
-            aria-label="設定同步"
+            aria-label="YAO 同步設定"
         >
 
             <button
-                class="yao-sync-close"
                 type="button"
+                class="yao-sync-close"
+                data-close
+                aria-label="關閉"
+            >
+                ×
+            </button>
+
+            <div class="yao-sync-icon">
+                ⚙️
+            </div>
+
+            <h2>
+                Firebase 尚未設定
+            </h2>
+
+            <p>
+                找不到 firebase-config.js。
+                請確認它和 index.html 放在同一層，
+                而且 index.html 已正確載入它。
+            </p>
+
+        </div>
+    `;
+
+    modal.querySelector(
+        "[data-close]"
+    ).onclick =
+        closeModal;
+
+    return;
+
+}
+
+
+if (
+    connection
+) {
+
+    modal.innerHTML = `
+
+        <div
+            class="yao-sync-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="YAO 同步設定"
+        >
+
+            <button
+                type="button"
+                class="yao-sync-close"
+                data-close
                 aria-label="關閉"
             >
                 ×
@@ -1159,373 +1568,798 @@ function showMainScreen() {
             </div>
 
             <h2>
-                在手機與電腦間同步
+                已連接雲端
             </h2>
 
             <p>
-                不用帳號、密碼或登入。
-                第一次只要使用同一組同步碼。
+                這台裝置正在使用 YAO 雲端同步。
+                新增、修改、刪除資料會自動同步。
             </p>
 
             <button
+                type="button"
                 class="yao-sync-primary"
-                type="button"
-                data-create
+                data-show-code
             >
-                在這台建立同步碼
+                查看同步碼
             </button>
-
-            <div class="yao-sync-divider">
-                或
-            </div>
-
-            <label
-                class="yao-sync-label"
-                for="yaoSyncCode"
-            >
-                輸入另一台裝置的同步碼
-            </label>
-
-            <input
-                id="yaoSyncCode"
-                class="yao-sync-input"
-                autocomplete="off"
-                placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
-            >
 
             <button
-                class="yao-sync-secondary"
                 type="button"
-                data-connect
+                class="yao-sync-text"
+                data-disconnect
             >
-                連接既有資料
+                中斷這台裝置的同步
             </button>
-
-            <p class="yao-sync-note">
-                連接後，這台的資料會以雲端資料為準。
-            </p>
 
         </div>
     `;
 
-
     modal.querySelector(
-        ".yao-sync-close"
+        "[data-close]"
     ).onclick =
         closeModal;
 
-
     modal.querySelector(
-        "[data-create]"
+        "[data-show-code]"
     ).onclick =
-        async event => {
+        () => {
 
-            event.currentTarget.disabled =
-                true;
-
-            event.currentTarget.textContent =
-                "正在建立…";
-
-            try {
-
-                await createSpace();
-
-            } catch (error) {
-
-                alert(
-                    `建立同步失敗：${error.message}`
-                );
-
-                event.currentTarget.disabled =
-                    false;
-
-                event.currentTarget.textContent =
-                    "在這台建立同步碼";
-
-            }
+            showCreatedCode(
+                connection.code
+            );
 
         };
 
-
     modal.querySelector(
-        "[data-connect]"
+        "[data-disconnect]"
     ).onclick =
-        async event => {
+        () => {
 
-            const input =
-                modal.querySelector(
-                    "#yaoSyncCode"
+            const confirmed =
+                confirm(
+                    "只會中斷這台裝置，不會刪除雲端資料。確定嗎？"
                 );
 
-            event.currentTarget.disabled =
-                true;
+            if (!confirmed) {
 
-            event.currentTarget.textContent =
-                "正在連接…";
-
-            try {
-
-                await connectSpace(
-                    input.value
-                );
-
-            } catch (error) {
-
-                alert(
-                    `無法連接：${error.message}`
-                );
-
-                event.currentTarget.disabled =
-                    false;
-
-                event.currentTarget.textContent =
-                    "連接既有資料";
+                return;
 
             }
 
+            removeConnection();
+
+            closeModal();
+
         };
+
+    return;
 
 }
 
 
-/* =========================================================
-   OPEN SETTINGS
-========================================================= */
+modal.innerHTML = `
 
-function openSettings() {
+    <div
+        class="yao-sync-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="YAO 同步設定"
+    >
 
-    closeModal();
+        <button
+            type="button"
+            class="yao-sync-close"
+            data-close
+            aria-label="關閉"
+        >
+            ×
+        </button>
 
-    modal =
-        document.createElement(
-            "div"
-        );
+        <div class="yao-sync-icon">
+            ☁️
+        </div>
 
-    modal.className =
-        "yao-sync-modal";
+        <h2>
+            電腦與手機同步
+        </h2>
 
-    document.body.appendChild(
-        modal
+        <p>
+            不用 Email、密碼，也不用額外建立帳號。
+            第一次只要建立同步碼，其他裝置輸入同一組碼即可。
+        </p>
+
+        <button
+            type="button"
+            class="yao-sync-primary"
+            data-create
+        >
+            在這台建立同步碼
+        </button>
+
+        <div class="yao-sync-divider">
+            或
+        </div>
+
+        <label
+            class="yao-sync-label"
+            for="yaoSyncCode"
+        >
+            輸入既有同步碼
+        </label>
+
+        <input
+            id="yaoSyncCode"
+            class="yao-sync-input"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            maxlength="29"
+            placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+        >
+
+        <button
+            type="button"
+            class="yao-sync-secondary"
+            data-connect
+        >
+            連接既有資料
+        </button>
+
+        <p class="yao-sync-note">
+            連接後，這台裝置會以雲端資料為準。
+        </p>
+
+    </div>
+`;
+
+
+modal.querySelector(
+    "[data-close]"
+).onclick =
+    closeModal;
+
+
+modal.querySelector(
+    "[data-create]"
+).onclick =
+    async event => {
+
+        const button =
+            event.currentTarget;
+
+        button.disabled =
+            true;
+
+        button.textContent =
+            "正在建立…";
+
+        try {
+
+            await createSyncSpace();
+
+        } catch (error) {
+
+            console.error(
+                error
+            );
+
+            alert(
+                `建立同步失敗：${error.message}`
+            );
+
+            button.disabled =
+                false;
+
+            button.textContent =
+                "在這台建立同步碼";
+
+        }
+
+    };
+
+
+modal.querySelector(
+    "[data-connect]"
+).onclick =
+    async event => {
+
+        const input =
+            modal.querySelector(
+                "#yaoSyncCode"
+            );
+
+        const button =
+            event.currentTarget;
+
+        const code =
+            normaliseCode(
+                input.value
+            );
+
+        if (
+            code.length !==
+            SYNC_CODE_LENGTH
+        ) {
+
+            alert(
+                "請輸入完整的 24 碼同步碼。"
+            );
+
+            input.focus();
+
+            return;
+
+        }
+
+        button.disabled =
+            true;
+
+        button.textContent =
+            "正在連接…";
+
+        try {
+
+            await connectToSpace(
+                code
+            );
+
+        } catch (error) {
+
+            console.error(
+                error
+            );
+
+            alert(
+                `連接失敗：${error.message}`
+            );
+
+            button.disabled =
+                false;
+
+            button.textContent =
+                "連接既有資料";
+
+        }
+
+    };
+
+
+const input =
+    modal.querySelector(
+        "#yaoSyncCode"
     );
 
-    showMainScreen();
+input.addEventListener(
+    "input",
+    () => {
+
+        const normalised =
+            normaliseCode(
+                input.value
+            );
+
+        input.value =
+            displayCode(
+                normalised
+            );
+
+    }
+);
 
 }
 
+/* =========================================================
+SYNC BUTTON CSS
+========================================================= */
+
+function injectStyles() {
+
+if (
+    document.getElementById(
+        "yao-sync-styles"
+    )
+) {
+
+    return;
+
+}
+
+const style =
+    document.createElement(
+        "style"
+    );
+
+style.id =
+    "yao-sync-styles";
+
+style.textContent = `
+
+    .yao-sync-launcher {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 900;
+
+        border: 0;
+        border-radius: 999px;
+
+        padding:
+            11px 15px;
+
+        background:
+            #111827;
+
+        color:
+            #ffffff;
+
+        box-shadow:
+            0 8px 24px
+            rgba(17, 24, 39, .24);
+
+        font:
+            inherit;
+
+        font-size:
+            13px;
+
+        font-weight:
+            700;
+
+        cursor:
+            pointer;
+
+        transition:
+            transform .15s ease,
+            box-shadow .15s ease,
+            background .15s ease;
+
+        -webkit-tap-highlight-color:
+            transparent;
+    }
+
+
+    .yao-sync-launcher:hover {
+        transform:
+            translateY(-1px);
+
+        box-shadow:
+            0 10px 28px
+            rgba(17, 24, 39, .28);
+    }
+
+
+    .yao-sync-launcher[data-state="ready"] {
+        background:
+            #155e75;
+    }
+
+
+    .yao-sync-launcher[data-state="working"] {
+        opacity:
+            .85;
+    }
+
+
+    .yao-sync-launcher[data-state="error"] {
+        background:
+            #7f1d1d;
+    }
+
+
+    .yao-sync-modal {
+        position:
+            fixed;
+
+        inset:
+            0;
+
+        z-index:
+            2000;
+
+        display:
+            grid;
+
+        place-items:
+            center;
+
+        padding:
+            18px;
+
+        background:
+            rgba(17, 24, 39, .56);
+
+        box-sizing:
+            border-box;
+    }
+
+
+    .yao-sync-modal *,
+    .yao-sync-modal *::before,
+    .yao-sync-modal *::after {
+        box-sizing:
+            border-box;
+    }
+
+
+    .yao-sync-card {
+        position:
+            relative;
+
+        width:
+            min(420px, 100%);
+
+        max-height:
+            calc(100vh - 36px);
+
+        overflow:
+            auto;
+
+        padding:
+            28px;
+
+        border-radius:
+            22px;
+
+        background:
+            #ffffff;
+
+        color:
+            #111827;
+
+        box-shadow:
+            0 24px 80px
+            rgba(0, 0, 0, .28);
+
+        text-align:
+            center;
+    }
+
+
+    .yao-sync-card h2 {
+        margin:
+            8px 0 10px;
+
+        font-size:
+            21px;
+
+        line-height:
+            1.35;
+    }
+
+
+    .yao-sync-card p {
+        margin:
+            0 0 20px;
+
+        color:
+            #6b7280;
+
+        font-size:
+            14px;
+
+        line-height:
+            1.65;
+    }
+
+
+    .yao-sync-icon {
+        font-size:
+            31px;
+
+        line-height:
+            1;
+    }
+
+
+    .yao-sync-close {
+        position:
+            absolute;
+
+        top:
+            13px;
+
+        right:
+            13px;
+
+        width:
+            34px;
+
+        height:
+            34px;
+
+        border:
+            0;
+
+        border-radius:
+            9px;
+
+        background:
+            #f3f4f6;
+
+        color:
+            #111827;
+
+        font-size:
+            23px;
+
+        line-height:
+            1;
+
+        cursor:
+            pointer;
+    }
+
+
+    .yao-sync-primary,
+    .yao-sync-secondary {
+        width:
+            100%;
+
+        border:
+            0;
+
+        border-radius:
+            11px;
+
+        padding:
+            12px 14px;
+
+        font:
+            inherit;
+
+        font-weight:
+            700;
+
+        cursor:
+            pointer;
+    }
+
+
+    .yao-sync-primary {
+        background:
+            #111827;
+
+        color:
+            #ffffff;
+    }
+
+
+    .yao-sync-primary:disabled,
+    .yao-sync-secondary:disabled {
+        opacity:
+            .55;
+
+        cursor:
+            wait;
+    }
+
+
+    .yao-sync-secondary {
+        margin-top:
+            9px;
+
+        background:
+            #e5e7eb;
+
+        color:
+            #111827;
+    }
+
+
+    .yao-sync-text {
+        border:
+            0;
+
+        background:
+            transparent;
+
+        color:
+            #6b7280;
+
+        margin-top:
+            15px;
+
+        padding:
+            6px;
+
+        font:
+            inherit;
+
+        font-size:
+            13px;
+
+        cursor:
+            pointer;
+    }
+
+
+    .yao-sync-divider {
+        margin:
+            18px 0;
+
+        color:
+            #9ca3af;
+
+        font-size:
+            13px;
+    }
+
+
+    .yao-sync-label {
+        display:
+            block;
+
+        margin-bottom:
+            7px;
+
+        color:
+            #4b5563;
+
+        font-size:
+            13px;
+
+        font-weight:
+            700;
+
+        text-align:
+            left;
+    }
+
+
+    .yao-sync-input {
+        width:
+            100%;
+
+        border:
+            1px solid
+            #d1d5db;
+
+        border-radius:
+            11px;
+
+        padding:
+            12px;
+
+        background:
+            #ffffff;
+
+        color:
+            #111827;
+
+        font:
+            inherit;
+
+        letter-spacing:
+            .06em;
+
+        outline:
+            none;
+    }
+
+
+    .yao-sync-input:focus {
+        border-color:
+            #6b7280;
+
+        box-shadow:
+            0 0 0 3px
+            rgba(107, 114, 128, .14);
+    }
+
+
+    .yao-sync-code {
+        display:
+            block;
+
+        margin:
+            16px 0;
+
+        padding:
+            14px 10px;
+
+        border-radius:
+            12px;
+
+        background:
+            #f3f4f6;
+
+        color:
+            #111827;
+
+        font-family:
+            ui-monospace,
+            SFMono-Regular,
+            Menlo,
+            Monaco,
+            Consolas,
+            monospace;
+
+        font-size:
+            17px;
+
+        font-weight:
+            800;
+
+        letter-spacing:
+            .08em;
+
+        word-break:
+            break-word;
+    }
+
+
+    .yao-sync-note {
+        margin:
+            13px 0 0 !important;
+
+        color:
+            #9ca3af !important;
+
+        font-size:
+            12px !important;
+
+        line-height:
+            1.55 !important;
+    }
+
+
+    @media (
+        max-width: 620px
+    ) {
+
+        .yao-sync-launcher {
+            right:
+                12px;
+
+            bottom:
+                12px;
+        }
+
+
+        .yao-sync-card {
+            padding:
+                25px 20px;
+        }
+
+    }
+
+`;
+
+document.head.appendChild(
+    style
+);
+
+}
 
 /* =========================================================
-   MOUNT
+MOUNT BUTTON
 ========================================================= */
 
 function mount() {
 
-    const style =
-        document.createElement(
-            "style"
+if (
+    !document.body
+) {
+
+    return;
+
+}
+
+injectStyles();
+
+if (
+    document.querySelector(
+        ".yao-sync-launcher"
+    )
+) {
+
+    launcher =
+        document.querySelector(
+            ".yao-sync-launcher"
         );
-
-    style.textContent = `
-
-        .yao-sync-launcher {
-            position: fixed;
-            right: 18px;
-            bottom: 18px;
-            z-index: 900;
-            border: 0;
-            border-radius: 999px;
-            background: #111827;
-            color: #fff;
-            padding: 11px 15px;
-            box-shadow:
-                0 8px 24px
-                rgba(17,24,39,.24);
-            font: inherit;
-            font-size: 13px;
-            cursor: pointer;
-        }
-
-        .yao-sync-launcher[data-state="ready"] {
-            background: #155e75;
-        }
-
-        .yao-sync-modal {
-            position: fixed;
-            inset: 0;
-            z-index: 2000;
-            display: grid;
-            place-items: center;
-            padding: 18px;
-            background:
-                rgba(17,24,39,.56);
-        }
-
-        .yao-sync-card {
-            position: relative;
-            width: min(420px,100%);
-            padding: 28px;
-            border-radius: 22px;
-            background: #fff;
-            color: #111827;
-            box-shadow:
-                0 24px 80px
-                rgba(0,0,0,.28);
-            text-align: center;
-        }
-
-        .yao-sync-card h2 {
-            margin: 8px 0 10px;
-            font-size: 21px;
-        }
-
-        .yao-sync-card p {
-            margin: 0 0 20px;
-            color: #6b7280;
-            line-height: 1.65;
-            font-size: 14px;
-        }
-
-        .yao-sync-icon {
-            font-size: 31px;
-        }
-
-        .yao-sync-close {
-            position: absolute;
-            right: 13px;
-            top: 13px;
-            border: 0;
-            border-radius: 9px;
-            background: #f3f4f6;
-            font-size: 23px;
-            line-height: 1;
-            width: 34px;
-            height: 34px;
-            cursor: pointer;
-        }
-
-        .yao-sync-primary,
-        .yao-sync-secondary {
-            width: 100%;
-            border: 0;
-            border-radius: 11px;
-            padding: 12px 14px;
-            font: inherit;
-            font-weight: 700;
-            cursor: pointer;
-        }
-
-        .yao-sync-primary {
-            background: #111827;
-            color: #fff;
-        }
-
-        .yao-sync-secondary {
-            background: #e5e7eb;
-            color: #111827;
-            margin-top: 9px;
-        }
-
-        .yao-sync-text {
-            border: 0;
-            background: none;
-            color: #6b7280;
-            margin-top: 15px;
-            font: inherit;
-            font-size: 13px;
-            cursor: pointer;
-        }
-
-        .yao-sync-divider {
-            margin: 18px 0;
-            color: #9ca3af;
-            font-size: 13px;
-        }
-
-        .yao-sync-label {
-            display: block;
-            text-align: left;
-            margin-bottom: 7px;
-            color: #4b5563;
-            font-size: 13px;
-            font-weight: 700;
-        }
-
-        .yao-sync-input {
-            width: 100%;
-            border: 1px solid #d1d5db;
-            border-radius: 11px;
-            padding: 12px;
-            font: inherit;
-            letter-spacing: .04em;
-        }
-
-        .yao-sync-code {
-            display: block;
-            margin: 16px 0;
-            border-radius: 12px;
-            padding: 14px 10px;
-            background: #f3f4f6;
-            font-family:
-                ui-monospace,
-                SFMono-Regular,
-                Menlo,
-                monospace;
-            font-weight: 800;
-            letter-spacing: .08em;
-            font-size: 17px;
-        }
-
-        .yao-sync-note {
-            margin: 13px 0 0 !important;
-            font-size: 12px !important;
-            color: #9ca3af !important;
-        }
-
-        .yao-sync-card code {
-            font-size: .9em;
-        }
-
-        @media (max-width:620px) {
-
-            .yao-sync-launcher {
-                right: 12px;
-                bottom: 12px;
-            }
-
-            .yao-sync-card {
-                padding: 25px 20px;
-            }
-
-        }
-
-    `;
-
-    document.head.appendChild(
-        style
-    );
-
-
-    const launcher =
-        document.createElement(
-            "button"
-        );
-
-    launcher.type = "button";
-
-    launcher.className =
-        "yao-sync-launcher";
-
-    launcher.textContent =
-        "☁️ 同步";
-
-    launcher.onclick =
-        openSettings;
-
-    document.body.appendChild(
-        launcher
-    );
-
-    statusEl =
-        launcher;
 
     setStatus(
         connection
@@ -1538,38 +2372,100 @@ function mount() {
 
     restoreConnection();
 
+    return;
+
 }
 
+launcher =
+    document.createElement(
+        "button"
+    );
+
+launcher.type =
+    "button";
+
+launcher.className =
+    "yao-sync-launcher";
+
+launcher.textContent =
+    "☁️ 同步";
+
+launcher.setAttribute(
+    "aria-label",
+    "YAO 雲端同步"
+);
+
+launcher.onclick =
+    showSettings;
+
+document.body.appendChild(
+    launcher
+);
+
+setStatus(
+    connection
+        ? "連線中…"
+        : "尚未啟用同步",
+    connection
+        ? "working"
+        : "idle"
+);
+
+restoreConnection();
+
+}
 
 /* =========================================================
-   PUBLIC API
+PUBLIC API
 ========================================================= */
 
 window.YaoCloudSync = {
-    openSettings,
-    schedulePush
+
+openSettings:
+    showSettings,
+
+schedulePush,
+
+getStatus() {
+
+    return {
+
+        text:
+            statusText,
+
+        state:
+            statusState,
+
+        connected:
+            Boolean(
+                activeSpace
+            )
+
+    };
+
+}
+
 };
 
-
 /* =========================================================
-   START
+START
 ========================================================= */
 
 if (
-    document.readyState === "loading"
+document.readyState ===
+"loading"
 ) {
 
-    document.addEventListener(
-        "DOMContentLoaded",
-        mount,
-        {
-            once: true
-        }
-    );
+document.addEventListener(
+    "DOMContentLoaded",
+    mount,
+    {
+        once: true
+    }
+);
 
 } else {
 
-    mount();
+mount();
 
 }
-```
