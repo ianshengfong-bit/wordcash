@@ -1,5 +1,5 @@
 /* =========================================================
-   YAO 加班費計算器 V1.5
+   YAO 加班費計算器 V2.0
    PDF 薪資單精修版
 
    注意：
@@ -19,6 +19,7 @@
 const STORAGE_KEY = "YAO_OVERTIME_RECORDS_V1";
 const SETTINGS_KEY = "YAO_OVERTIME_SETTINGS_V1";
 const MILEAGE_STORAGE_KEY = "YAO_MILEAGE_RECORDS_V1";
+const RECORD_SORT_KEY = "YAO_OVERTIME_RECORD_SORT_V1";
 
 
 /* =========================================================
@@ -991,6 +992,13 @@ function render() {
 
 
     if (
+        $("heroSalary")
+    ) {
+        $("heroSalary").textContent = money(settings.salary);
+    }
+
+
+    if (
         $("monthOvertimePay")
     ) {
 
@@ -1183,311 +1191,82 @@ function render() {
 
 function renderRecords() {
 
-    const container =
-        $("records");
+    const container = $("records");
+    const emptyState = $("emptyState");
 
-    const emptyState =
-        $("emptyState");
+    if (!container) return;
 
+    const monthRecords = getMonthRecords()
+        .slice()
+        .sort((a, b) => {
+            const result = String(a.date).localeCompare(String(b.date));
+            return recordSortOrder === "asc" ? result : -result;
+        });
 
-    if (!container) {
-        return;
+    container.innerHTML = "";
+
+    if (emptyState) {
+        emptyState.style.display = monthRecords.length ? "none" : "block";
     }
 
+    monthRecords.forEach(record => {
+        const result = calculateRecord(record);
+        const card = document.createElement("div");
+        card.className = "record-card record-card-v2";
 
-    const monthRecords =
-        getMonthRecords();
-
-
-    container.innerHTML =
-        "";
-
-
-    if (
-        emptyState
-    ) {
-
-        emptyState.style.display =
-            monthRecords.length
-                ? "none"
-                : "block";
-    }
-
-
-    monthRecords.forEach(
-        record => {
-
-            const result =
-                calculateRecord(
-                    record
-                );
-
-
-            const card =
-                document.createElement(
-                    "div"
-                );
-
-
-            card.className =
-                "record-card";
-
-
-            card.innerHTML = `
-
-                <div class="record-top">
-
-                    <div>
-
-                        <div class="record-title">
-                            ${escapeHTML(
-                                formatDate(
-                                    record.date
-                                )
-                            )}
-                        </div>
-
-                        <div class="record-subtitle">
-
-                            ${escapeHTML(
-                                getDayTypeText(
-                                    record.dayType
-                                )
-                            )}
-
-                            ・
-
-                            ${escapeHTML(
-                                record.start || ""
-                            )}
-
-                            →
-
-                            ${escapeHTML(
-                                record.end || ""
-                            )}
-
-                        </div>
-
+        card.innerHTML = `
+            <div class="record-top">
+                <div>
+                    <div class="record-title">${escapeHTML(formatDate(record.date))}</div>
+                    <div class="record-subtitle">
+                        ${escapeHTML(getDayTypeText(record.dayType))}
+                        ・ ${escapeHTML(record.start || "")} → ${escapeHTML(record.end || "")}
                     </div>
-
-
-                    <div class="record-pay">
-                        ${money(
-                            result.total
-                        )}
-                    </div>
-
                 </div>
+                <div class="record-pay">${money(result.total)}</div>
+            </div>
 
+            <div class="record-quick-line">
+                <span>公司計薪 <strong>${numberText(result.paidHours, 1)} 小時</strong></span>
+                <button class="record-detail-toggle" type="button" data-toggle-detail>詳細 ▾</button>
+            </div>
 
+            ${record.note ? `<div class="record-note-v2">${escapeHTML(record.note)}</div>` : ""}
+
+            <div class="record-details-v2" hidden>
                 <div class="record-metrics">
-
-                    <div class="metric">
-
-                        <span>
-                            實際工作
-                        </span>
-
-                        <strong>
-                            ${minutesToText(
-                                result.actualWorkMinutes
-                            )}
-                        </strong>
-
-                    </div>
-
-
-                    <div class="metric">
-
-                        <span>
-                            實際加班
-                        </span>
-
-                        <strong>
-                            ${minutesToText(
-                                result.overtimeMinutes
-                            )}
-                        </strong>
-
-                    </div>
-
-
-                    <div class="metric">
-
-                        <span>
-                            公司計薪
-                        </span>
-
-                        <strong>
-                            ${numberText(
-                                result.paidHours,
-                                1
-                            )} 小時
-                        </strong>
-
-                    </div>
-
-
-                    <div class="metric">
-
-                        <span>
-                            1.34 倍
-                        </span>
-
-                        <strong>
-
-                            ${numberText(
-                                result.firstTwoHours,
-                                1
-                            )}h /
-
-                            ${money(
-                                result.payFirst
-                            )}
-
-                        </strong>
-
-                    </div>
-
-
-                    <div class="metric">
-
-                        <span>
-                            1.67 倍
-                        </span>
-
-                        <strong>
-
-                            ${numberText(
-                                result.thirdToEighth,
-                                1
-                            )}h /
-
-                            ${money(
-                                result.paySecond
-                            )}
-
-                        </strong>
-
-                    </div>
-
-
-                    <div class="metric">
-
-                        <span>
-                            2.67 倍
-                        </span>
-
-                        <strong>
-
-                            ${numberText(
-                                result.ninthToTwelfth,
-                                1
-                            )}h /
-
-                            ${money(
-                                result.payThird
-                            )}
-
-                        </strong>
-
-                    </div>
-
+                    <div class="metric"><span>實際工作</span><strong>${minutesToText(result.actualWorkMinutes)}</strong></div>
+                    <div class="metric"><span>實際加班</span><strong>${minutesToText(result.overtimeMinutes)}</strong></div>
+                    <div class="metric"><span>公司計薪</span><strong>${numberText(result.paidHours, 1)} 小時</strong></div>
+                    <div class="metric"><span>1.34 倍</span><strong>${numberText(result.firstTwoHours, 1)}h / ${money(result.payFirst)}</strong></div>
+                    <div class="metric"><span>1.67 倍</span><strong>${numberText(result.thirdToEighth, 1)}h / ${money(result.paySecond)}</strong></div>
+                    <div class="metric"><span>2.67 倍</span><strong>${numberText(result.ninthToTwelfth, 1)}h / ${money(result.payThird)}</strong></div>
                 </div>
+            </div>
 
+            <div class="record-actions">
+                <button class="secondary" type="button" data-edit-record="${escapeHTML(record.id)}">編輯</button>
+                <button class="danger" type="button" data-delete-record="${escapeHTML(record.id)}">刪除</button>
+            </div>
+        `;
 
-                ${
-                    record.note
-                        ? `
-                            <div
-                                class="record-subtitle"
-                                style="margin-top:10px;"
-                            >
-                                備註：
-                                ${escapeHTML(
-                                    record.note
-                                )}
-                            </div>
-                        `
-                        : ""
-                }
-
-
-                <div class="record-actions">
-
-                    <button
-                        class="secondary"
-                        type="button"
-                        data-edit-record="${escapeHTML(
-                            record.id
-                        )}"
-                    >
-                        編輯
-                    </button>
-
-
-                    <button
-                        class="danger"
-                        type="button"
-                        data-delete-record="${escapeHTML(
-                            record.id
-                        )}"
-                    >
-                        刪除
-                    </button>
-
-                </div>
-            `;
-
-
-            container.appendChild(
-                card
-            );
-        }
-    );
-
-
-    container
-        .querySelectorAll(
-            "[data-edit-record]"
-        )
-        .forEach(button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    openRecord(
-                        button.dataset
-                            .editRecord
-                    );
-
-                }
-            );
-
+        const toggle = card.querySelector("[data-toggle-detail]");
+        const details = card.querySelector(".record-details-v2");
+        toggle?.addEventListener("click", () => {
+            details.hidden = !details.hidden;
+            toggle.textContent = details.hidden ? "詳細 ▾" : "收合 ▴";
         });
 
-
-    container
-        .querySelectorAll(
-            "[data-delete-record]"
-        )
-        .forEach(button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    deleteRecord(
-                        button.dataset
-                            .deleteRecord
-                    );
-
-                }
-            );
-
+        card.querySelector("[data-edit-record]")?.addEventListener("click", event => {
+            openRecord(event.currentTarget.dataset.editRecord);
         });
+
+        card.querySelector("[data-delete-record]")?.addEventListener("click", event => {
+            deleteRecord(event.currentTarget.dataset.deleteRecord);
+        });
+
+        container.appendChild(card);
+    });
 }
 
 
@@ -1731,6 +1510,103 @@ function renderMileage() {
             );
 
         });
+}
+
+
+/* =========================================================
+   QUICK RECORD
+========================================================= */
+
+function updateQuickRecordPreview() {
+    const preview = $("quickRecordPreview");
+    const end = $("quickEnd")?.value || "";
+    if (!preview) return;
+
+    const todayDate = new Date(getTodayString() + "T00:00:00");
+    const isWeekend = todayDate.getDay() === 0 || todayDate.getDay() === 6;
+
+    if (isWeekend) {
+        preview.innerHTML = "今天是週末，請使用 <strong>詳細設定</strong>，避免休息時間與實際開工時間計算錯誤。";
+        return;
+    }
+
+    if (!end) {
+        preview.textContent = "輸入今天的下班時間，就會自動試算。";
+        return;
+    }
+
+    const result = calculateRecord({
+        date: getTodayString(),
+        dayType: "weekday",
+        start: settings.normalStart,
+        end,
+        breakMinutes: 0
+    });
+
+    preview.innerHTML = `公司計薪 <strong>${numberText(result.paidHours, 1)} 小時</strong> ・ 預估 <strong>${money(result.total)}</strong>`;
+}
+
+function saveQuickRecord() {
+    const end = $("quickEnd")?.value || "";
+    const todayDate = new Date(getTodayString() + "T00:00:00");
+    const isWeekend = todayDate.getDay() === 0 || todayDate.getDay() === 6;
+
+    if (isWeekend) {
+        alert("今天是週末，請使用「詳細設定」輸入實際工作時間與休息時間。");
+        openQuickDetail();
+        return;
+    }
+
+    if (!end) {
+        alert("請先輸入今天的下班時間。");
+        return;
+    }
+
+    const today = getTodayString();
+    const existing = records.find(record => record.date === today && record.dayType === "weekday");
+
+    if (existing) {
+        const confirmed = confirm("今天已經有平日出勤紀錄，要用新的下班時間更新這一筆嗎？");
+        if (!confirmed) return;
+        existing.end = end;
+    } else {
+        records.push({
+            id: Date.now().toString() + Math.random().toString(36).slice(2),
+            date: today,
+            dayType: "weekday",
+            start: settings.normalStart,
+            end,
+            breakMinutes: 0,
+            note: ""
+        });
+    }
+
+    selectedMonth = getCurrentMonth();
+    saveData();
+    render();
+    $("quickEnd").value = "";
+    updateQuickRecordPreview();
+}
+
+function openQuickDetail() {
+    openRecord();
+    const quickEnd = $("quickEnd")?.value;
+    if (quickEnd) {
+        $("end").value = quickEnd;
+        updateRecordPreview();
+    }
+}
+
+function goCurrentMonth() {
+    selectedMonth = getCurrentMonth();
+    if ($("monthPicker")) $("monthPicker").value = selectedMonth;
+    render();
+}
+
+function changeRecordSort(value) {
+    recordSortOrder = value === "asc" ? "asc" : "desc";
+    localStorage.setItem(RECORD_SORT_KEY, recordSortOrder);
+    renderRecords();
 }
 
 
@@ -2774,7 +2650,7 @@ function exportData() {
     const data = {
 
         version:
-            "YAO_OVERTIME_V1.4",
+            "YAO_OVERTIME_V2.0",
 
         exportedAt:
             new Date()
@@ -5592,6 +5468,22 @@ function bindEvents() {
         );
 
 
+    $("quickSaveBtn")
+        ?.addEventListener("click", saveQuickRecord);
+
+    $("quickDetailBtn")
+        ?.addEventListener("click", openQuickDetail);
+
+    $("quickEnd")
+        ?.addEventListener("input", updateQuickRecordPreview);
+
+    $("todayBtn")
+        ?.addEventListener("click", goCurrentMonth);
+
+    $("recordSort")
+        ?.addEventListener("change", event => changeRecordSort(event.target.value));
+
+
     $("closeRecordModal")
         ?.addEventListener(
             "click",
@@ -5868,6 +5760,10 @@ let settings = {
 let selectedMonth =
     getCurrentMonth();
 
+let recordSortOrder =
+    localStorage.getItem(RECORD_SORT_KEY) ||
+    "desc";
+
 
 /* =========================================================
    CLOUD SYNC BRIDGE
@@ -5959,6 +5855,11 @@ document.addEventListener(
         }
 
 
+        if ($("recordSort")) {
+            $("recordSort").value = recordSortOrder;
+        }
+
+        updateQuickRecordPreview();
         render();
 
     }

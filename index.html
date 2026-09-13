@@ -12,7 +12,7 @@
 
     <meta
         name="theme-color"
-        content="#172033"
+        content="#25483f"
     >
 
     <meta
@@ -33,25 +33,25 @@
         }
 
         :root {
-            --bg: #f4f7fb;
+            --bg: #f4f7f5;
             --surface: #ffffff;
-            --surface-soft: #f8fafc;
+            --surface-soft: #f7faf8;
 
-            --text: #172033;
-            --text-dark: #111827;
+            --text: #26352f;
+            --text-dark: #18251f;
             --text-muted: #64748b;
             --text-light: #94a3b8;
 
             --border: #e2e8f0;
             --border-light: #edf2f7;
 
-            --primary: #172033;
-            --primary-hover: #24324a;
+            --primary: #25483f;
+            --primary-hover: #315e51;
 
-            --accent: #5b9bd5;
-            --accent-soft: #eaf4ff;
+            --accent: #2f7d67;
+            --accent-soft: #e8f3ef;
 
-            --success: #16845b;
+            --success: #187a55;
             --success-soft: #eaf8f1;
 
             --warning: #b7791f;
@@ -87,9 +87,9 @@
             background:
                 linear-gradient(
                     180deg,
-                    #eef4fa 0,
-                    #f4f7fb 250px,
-                    #f4f7fb 100%
+                    #edf5f1 0,
+                    #f4f7f5 250px,
+                    #f4f7f5 100%
                 );
 
             color: var(--text);
@@ -166,8 +166,8 @@
             background:
                 linear-gradient(
                     145deg,
-                    #172033,
-                    #2b3c58
+                    #25483f,
+                    #39705f
                 );
 
             color: #ffffff;
@@ -339,11 +339,11 @@
             background:
                 linear-gradient(
                     145deg,
-                    #172033 0%,
-                    #24324a 100%
+                    #25483f 0%,
+                    #315e51 100%
                 );
 
-            border-color: #172033;
+            border-color: #25483f;
 
             box-shadow:
                 0 14px 34px
@@ -525,8 +525,8 @@
             background:
                 linear-gradient(
                     135deg,
-                    #172033,
-                    #263653
+                    #25483f,
+                    #315e51
                 );
 
             color: #ffffff;
@@ -541,8 +541,8 @@
             background:
                 linear-gradient(
                     135deg,
-                    #21304a,
-                    #314461
+                    #315e51,
+                    #3d725f
                 );
 
             transform: translateY(-1px);
@@ -649,8 +649,8 @@
             background:
                 linear-gradient(
                     180deg,
-                    #5b9bd5,
-                    #8abbe2
+                    #2f7d67,
+                    #70aa97
                 );
         }
 
@@ -790,7 +790,7 @@
 
             font-weight: 800;
 
-            color: #1e5f91;
+            color: #23725d;
 
             white-space: nowrap;
         }
@@ -1790,6 +1790,56 @@
 
         }
 
+    
+
+        /* =====================================================
+           V2 — YAO Money 翡翠綠視覺
+        ===================================================== */
+        .income-hero {
+            margin-bottom: 14px; padding: 28px; border-radius: 24px;
+            color: #fff; background: linear-gradient(145deg,#25483f,#326654);
+            box-shadow: 0 18px 42px rgba(37,72,63,.20); position: relative; overflow: hidden;
+        }
+        .income-hero::after { content:""; position:absolute; width:260px; height:260px; right:-90px; top:-130px; border-radius:50%; background:rgba(255,255,255,.08); }
+        .income-hero-head { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; position:relative; z-index:1; }
+        .hero-kicker { font-size:13px; color:rgba(255,255,255,.72); margin-bottom:8px; }
+        .hero-total { font-size:42px; line-height:1.05; font-weight:850; letter-spacing:-1.2px; }
+        .hero-badge { font-size:11px; letter-spacing:1.4px; font-weight:800; color:#d9efe7; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); padding:7px 10px; border-radius:999px; }
+        .hero-breakdown { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:24px; position:relative; z-index:1; }
+        .hero-breakdown div { padding:12px 13px; border-radius:14px; background:rgba(255,255,255,.085); border:1px solid rgba(255,255,255,.08); }
+        .hero-breakdown span,.hero-breakdown strong { display:block; }
+        .hero-breakdown span { font-size:11px; color:rgba(255,255,255,.67); margin-bottom:4px; }
+        .hero-breakdown strong { font-size:16px; color:#fff; }
+        .hero-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:16px; font-size:12px; color:rgba(255,255,255,.72); position:relative; z-index:1; }
+        .hidden-stat { display:none; }
+        .quick-record-card { display:grid; grid-template-columns:1fr auto; gap:14px 20px; align-items:center; margin-bottom:14px; padding:18px 20px; border-radius:18px; background:#fff; border:1px solid #dfe9e4; box-shadow:var(--shadow-sm); }
+        .quick-record-title { font-weight:850; color:var(--text-dark); font-size:17px; }
+        .quick-record-sub { margin-top:4px; color:var(--text-muted); font-size:12px; }
+        .quick-record-controls { display:flex; gap:8px; align-items:center; }
+        .quick-record-controls input { min-height:40px; border:1px solid var(--border); border-radius:11px; padding:8px 11px; background:#fff; color:var(--text-dark); }
+        .quick-record-preview { grid-column:1/-1; padding-top:12px; border-top:1px solid #edf2ef; font-size:13px; color:#557064; }
+        .today-btn { width:auto!important; padding:0 11px; font-size:12px!important; font-weight:750; }
+        .sort-control { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--text-muted); }
+        .sort-control select { border:1px solid var(--border); background:#fff; color:var(--text-dark); border-radius:10px; padding:8px 10px; outline:none; }
+        .record-card-v2 { border-left:4px solid #70aa97; }
+        .record-quick-line { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:13px; padding-top:12px; border-top:1px solid #edf2ef; color:var(--text-muted); font-size:13px; }
+        .record-quick-line strong { color:var(--text-dark); }
+        .record-detail-toggle { border:0; background:transparent; color:#2f7d67; font-weight:750; padding:5px 0; }
+        .record-details-v2 { margin-top:10px; }
+        .record-note-v2 { margin-top:10px; padding:9px 11px; background:#f2f7f4; border-radius:10px; color:#587066; font-size:12px; line-height:1.5; }
+        .record-pay { color:#23725d; }
+        @media (max-width:680px) {
+            .income-hero { padding:21px 17px; border-radius:19px; }
+            .hero-total { font-size:34px; }
+            .hero-breakdown { grid-template-columns:repeat(2,1fr); margin-top:18px; }
+            .quick-record-card { grid-template-columns:1fr; padding:16px; }
+            .quick-record-controls { display:grid; grid-template-columns:1fr 1fr; }
+            .quick-record-controls input { grid-column:1/-1; width:100%; }
+            .section-header:has(#recordSort) { align-items:flex-start; }
+            .sort-control { flex-direction:column; align-items:flex-end; gap:4px; }
+            .sort-control select { max-width:118px; }
+        }
+
     </style>
 
 </head>
@@ -1840,154 +1890,47 @@
 
 
     <!-- =====================================================
-         收入總覽
+         V2 收入總覽 / 快速新增
     ====================================================== -->
 
-    <section class="summary-grid">
-
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                本月加班費
+    <section class="income-hero">
+        <div class="income-hero-head">
+            <div>
+                <div class="hero-kicker">本月預估總收入</div>
+                <div id="monthTotalIncome" class="hero-total">$0</div>
             </div>
-
-            <div
-                id="monthOvertimePay"
-                class="summary-value"
-            >
-                $0
-            </div>
-
+            <div class="hero-badge">YAO MONEY</div>
         </div>
 
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                里程淨收入
-            </div>
-
-            <div
-                id="monthMileageNet"
-                class="summary-value"
-            >
-                $0
-            </div>
-
+        <div class="hero-breakdown">
+            <div><span>底薪</span><strong id="heroSalary">依設定</strong></div>
+            <div><span>加班費</span><strong id="monthOvertimePay">$0</strong></div>
+            <div><span>里程淨收入</span><strong id="monthMileageNet">$0</strong></div>
+            <div><span>額外收入</span><strong id="monthExtraIncome">$0</strong></div>
         </div>
 
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                額外收入
-            </div>
-
-            <div
-                id="monthExtraIncome"
-                class="summary-value"
-            >
-                $0
-            </div>
-
+        <div class="hero-meta">
+            <span><strong id="monthPaidHours">0</strong> 小時公司計薪</span>
+            <span>・</span>
+            <span><strong id="monthDays">0</strong> 天加班</span>
+            <span>・</span>
+            <span id="mileageKm">0 km</span>
+            <span class="hidden-stat" id="recordCount">0</span>
         </div>
-
-
-        <!-- 最重要 -->
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                本月預估總收入
-            </div>
-
-            <div
-                id="monthTotalIncome"
-                class="summary-value"
-            >
-                $0
-            </div>
-
-        </div>
-
-
     </section>
 
-
-    <!-- =====================================================
-         工作統計
-    ====================================================== -->
-
-    <section class="summary-grid small">
-
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                公司計薪時數
-            </div>
-
-            <div
-                id="monthPaidHours"
-                class="summary-value"
-            >
-                0
-            </div>
-
+    <section class="quick-record-card">
+        <div class="quick-record-copy">
+            <div class="quick-record-title">快速記今天加班</div>
+            <div class="quick-record-sub">平日直接輸入下班時間即可；特殊日期請使用詳細設定。</div>
         </div>
-
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                加班天數
-            </div>
-
-            <div
-                id="monthDays"
-                class="summary-value"
-            >
-                0
-            </div>
-
+        <div class="quick-record-controls">
+            <input id="quickEnd" type="time" aria-label="今天下班時間">
+            <button id="quickSaveBtn" class="primary" type="button">儲存今天</button>
+            <button id="quickDetailBtn" class="secondary" type="button">詳細設定</button>
         </div>
-
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                里程
-            </div>
-
-            <div
-                id="mileageKm"
-                class="summary-value"
-            >
-                0 km
-            </div>
-
-        </div>
-
-
-        <div class="summary-card">
-
-            <div class="summary-label">
-                出勤筆數
-            </div>
-
-            <div
-                id="recordCount"
-                class="summary-value"
-            >
-                0
-            </div>
-
-        </div>
-
-
+        <div id="quickRecordPreview" class="quick-record-preview">輸入今天的下班時間，就會自動試算。</div>
     </section>
-
 
     <!-- =====================================================
          月份控制
@@ -2022,6 +1965,8 @@
             >
                 ›
             </button>
+
+            <button id="todayBtn" class="today-btn" type="button">今天</button>
 
 
         </div>
@@ -2141,8 +2086,16 @@
         <div class="section-header">
 
             <h2>
-                出勤紀錄
+                加班紀錄
             </h2>
+
+            <label class="sort-control">
+                <span>日期排序</span>
+                <select id="recordSort" aria-label="加班紀錄日期排序">
+                    <option value="desc">新 → 舊</option>
+                    <option value="asc">舊 → 新</option>
+                </select>
+            </label>
 
         </div>
 
