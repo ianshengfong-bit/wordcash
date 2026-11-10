@@ -838,7 +838,7 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
             <div class="card-head">
                 <div>
                     <h2>獎金／年終</h2>
-                    <div class="sub">另外計入年收入，不影響月平均</div>
+                    <div class="sub">另外計入年收入，不影響月平均；統計依「算在哪個月」，不是入帳日</div>
                 </div>
                 <button class="btn sm" type="button" data-action="add-bonus">＋ 新增</button>
             </div>
@@ -1079,7 +1079,12 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
                 <div class="fields">
                     <div class="field"><label for="bonusDate">入帳日期</label><input id="bonusDate" type="date" required></div>
                     <div class="field"><label for="bonusName">名稱</label><input id="bonusName" type="text" list="bonusNames" placeholder="例如：年終獎金" required></div>
-                    <div class="field full"><label for="bonusAmount">實領金額</label><input id="bonusAmount" type="number" min="0" step="1" inputmode="numeric" required></div>
+                    <div class="field"><label for="bonusAmount">實領金額</label><input id="bonusAmount" type="number" min="0" step="1" inputmode="numeric" required></div>
+                    <div class="field">
+                        <label for="bonusMonth">算在哪個月</label>
+                        <input id="bonusMonth" type="month" required>
+                    </div>
+                    <div class="field full"><div class="hint" id="bonusMonthHint"></div></div>
                     <div class="field full"><label for="bonusNote">備註</label><textarea id="bonusNote"></textarea></div>
                 </div>
                 <datalist id="bonusNames">
@@ -1110,6 +1115,9 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
                         <label for="salary">目前月薪</label>
                         <input id="salary" type="number" min="0" step="1" inputmode="numeric">
                         <div class="hint" id="salaryHint"></div>
+                    </div>
+                    <div class="field full">
+                        <label class="check"><input id="payNextMonth" type="checkbox"><span>薪水是次月發放（例如 8 月的薪水 9/10 才入帳）。新增獎金時，會自動算在入帳日的前一個月</span></label>
                     </div>
                 </div>
                 <div class="group-title" style="border-top:0;padding-top:0;margin-top:14px">

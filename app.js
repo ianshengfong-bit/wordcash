@@ -10,7 +10,8 @@
    settings.monthItems     單月補貼／扣款 [{ id, month, kind, name, amount }]
    settings.fixedItems     每月固定項目  [{ id, kind, name, amount }]
    settings.payslips       每月實領      { "YYYY-MM": { income, deduct, received, partial, note } }
-   settings.bonuses        獎金／年終    [{ id, date, name, amount, note }]
+   settings.bonuses        獎金／年終    [{ id, date, month, name, amount, note }]
+                           date 是入帳日，month 是歸屬月份（統計用）
 ========================================================= */
 
 "use strict";
@@ -38,7 +39,8 @@ const DEFAULT_SETTINGS = {
     fullAttendance: 0,
     fullAttendanceIncluded: true,
     mileageRate: 6,
-    mileageWearRate: 3
+    mileageWearRate: 3,
+    payNextMonth: true
 };
 
 const LEAVE_TYPES = {
@@ -127,6 +129,7 @@ function normaliseSettings(source) {
     s.fullAttendance = Math.max(0, num(s.fullAttendance));
     s.fullAttendanceIncluded = s.fullAttendanceIncluded !== false;
     s.earlyOvertime = s.earlyOvertime !== false;
+    s.payNextMonth = s.payNextMonth !== false;
     s.mileageRate = Math.max(0, num(s.mileageRate));
     s.mileageWearRate = Math.max(0, num(s.mileageWearRate));
 
@@ -1757,6 +1760,7 @@ function openSettings() {
     $("setMileageRate").value = settings.mileageRate;
     $("setMileageWear").value = settings.mileageWearRate;
     $("themeSelect").value = getTheme();
+    $("payNextMonth").checked = settings.payNextMonth;
 
     $("salaryHistoryRows").innerHTML = settings.salaryHistory.map(historyRowHTML).join("");
     $("fixedRows").innerHTML = settings.fixedItems.map(fixedRowHTML).join("");
@@ -1796,6 +1800,7 @@ function saveSettings(event) {
         fullAttendance: Math.max(0, num($("fullAttendance").value)),
         fullAttendanceIncluded: $("fullAttendanceIncluded").checked,
         dayDivisor: num($("dayDivisor").value) > 0 ? num($("dayDivisor").value) : 30,
+        payNextMonth: $("payNextMonth").checked,
         mileageRate: Math.max(0, num($("setMileageRate").value)),
         mileageWearRate: Math.max(0, num($("setMileageWear").value)),
         salaryHistory,
@@ -1830,6 +1835,18 @@ function resetQuickStart() {
 /* =========================================================
    收入帳本：計算
 ========================================================= */
+
+// 獎金歸屬月份：有指定就用指定的，舊資料沒有就用入帳日的月份。
+function getBonusMonth(bonus) {
+    return bonus.month || getMonthFromDate(bonus.date) || "";
+}
+
+// 依入帳日推算預設的歸屬月份（次月發薪就往前推一個月）。
+function defaultBonusMonth(date) {
+    const month = getMonthFromDate(date);
+    if (!month) return "";
+    return settings.payNextMonth ? shiftMonth(month, -1) : month;
+}
 
 function sumRows(rows) {
     return (Array.isArray(rows) ? rows : []).reduce((sum, row) => sum + num(row.amount), 0);
@@ -1868,7 +1885,7 @@ function yearStats(year) {
         const month = year + "-" + pad2(m);
         const slip = settings.payslips[month] || null;
         const bonus = settings.bonuses
-            .filter(item => getMonthFromDate(item.date) === month)
+            .filter(item => getBonusMonth(item) === month)
             .reduce((sum, item) => sum + num(item.amount), 0);
 
         const calc = computeMonth(month);
@@ -1894,7 +1911,7 @@ function yearStats(year) {
     const deductTotal = sum(filled, item => item.totals.deduct);
     const otTotal = sum(filled, item => item.totals.ot);
     const bonusTotal = sum(months, item => item.bonus);
-    const bonusCount = settings.bonuses.filter(item => String(item.date || "").startsWith(year + "-")).length;
+    const bonusCount = settings.bonuses.filter(item => getBonusMonth(item).startsWith(year + "-")).length;
 
     const mileageTotal = sum(months, item => item.mileage);
     const mileageGross = sum(months, item => item.calc.mileageGross);
@@ -2136,7 +2153,7 @@ function renderBonuses() {
     if (!el) return;
 
     const list = sortByDate(
-        settings.bonuses.filter(item => String(item.date || "").startsWith(selectedYear + "-")),
+        settings.bonuses.filter(item => getBonusMonth(item).startsWith(selectedYear + "-")),
         "desc"
     );
 
@@ -2146,12 +2163,15 @@ function renderBonuses() {
                 <div class="item-top">
                     <div>
                         <div class="item-title">${escapeHTML(item.name || "獎金")}</div>
-                        <div class="item-sub">${escapeHTML(formatDate(item.date))}${item.note ? "<br>" + escapeHTML(item.note) : ""}</div>
+                        <div class="item-sub">${escapeHTML(formatDate(item.date))} 入帳${item.note ? "<br>" + escapeHTML(item.note) : ""}</div>
                     </div>
                     <div class="item-amt">${money(item.amount)}</div>
                 </div>
                 <div class="item-foot">
-                    <div class="tags"><span class="tag gold">獎金</span></div>
+                    <div class="tags">
+                        <span class="tag gold">獎金</span>
+                        <span class="tag green">算在 ${escapeHTML(formatMonth(getBonusMonth(item)))}</span>
+                    </div>
                     <div class="item-btns">
                         <button class="link-btn" type="button" data-action="edit-bonus" data-id="${escapeHTML(item.id)}">編輯</button>
                         <button class="link-btn del" type="button" data-action="delete-bonus" data-id="${escapeHTML(item.id)}">刪除</button>
@@ -2355,9 +2375,28 @@ function deleteSlip() {
    獎金／年終
 ========================================================= */
 
+let bonusMonthTouched = false;
+
+function updateBonusMonthHint() {
+    const date = $("bonusDate").value;
+    const month = $("bonusMonth").value;
+
+    // 還沒手動改過歸屬月份時，跟著入帳日自動帶入。
+    if (!bonusMonthTouched && date) {
+        $("bonusMonth").value = defaultBonusMonth(date);
+    }
+
+    const current = $("bonusMonth").value || month;
+
+    $("bonusMonthHint").textContent = current
+        ? `這筆會統計在 ${formatMonth(current)}（圖表與年度都依這個月份），入帳日只是紀錄。`
+        : "入帳日只是紀錄；統計依「算在哪個月」。";
+}
+
 function openBonus(id = null) {
     $("bonusForm").reset();
     $("bonusId").value = "";
+    bonusMonthTouched = false;
 
     const bonus = id ? settings.bonuses.find(item => String(item.id) === String(id)) : null;
 
@@ -2367,6 +2406,8 @@ function openBonus(id = null) {
         $("bonusModalTitle").textContent = "編輯獎金";
         $("bonusId").value = bonus.id;
         $("bonusDate").value = bonus.date || "";
+        $("bonusMonth").value = getBonusMonth(bonus);
+        bonusMonthTouched = true;
         $("bonusName").value = bonus.name || "";
         $("bonusAmount").value = bonus.amount ?? "";
         $("bonusNote").value = bonus.note || "";
@@ -2376,6 +2417,7 @@ function openBonus(id = null) {
             selectedYear === new Date().getFullYear() ? getTodayString() : selectedYear + "-01-01";
     }
 
+    updateBonusMonthHint();
     openModal("bonusModal");
 }
 
@@ -2387,6 +2429,7 @@ function saveBonus(event) {
     const data = {
         id: id || uid(),
         date: $("bonusDate").value,
+        month: $("bonusMonth").value || getMonthFromDate($("bonusDate").value),
         name: $("bonusName").value.trim(),
         amount: Math.max(0, num($("bonusAmount").value)),
         note: $("bonusNote").value.trim()
@@ -2402,11 +2445,11 @@ function saveBonus(event) {
     if (id && index !== -1) settings.bonuses[index] = data;
     else settings.bonuses.push(data);
 
-    selectedYear = Number(data.date.slice(0, 4)) || selectedYear;
+    selectedYear = Number(data.month.slice(0, 4)) || selectedYear;
     saveData();
     closeModals();
     renderLedger();
-    toast("獎金已儲存");
+    toast("獎金已儲存，算在 " + formatMonth(data.month));
 }
 
 function deleteBonus(id) {
@@ -5235,6 +5278,8 @@ function bindEvents() {
     $("leaveType").addEventListener("change", applyLeaveTypeDefault);
     $("mileageForm").addEventListener("input", updateMileagePreview);
     $("slipForm").addEventListener("input", updateSlipSummary);
+    $("bonusDate").addEventListener("change", updateBonusMonthHint);
+    $("bonusMonth").addEventListener("change", () => { bonusMonthTouched = true; updateBonusMonthHint(); });
     $("settingsForm").addEventListener("input", updateSalaryHint);
 
     $("slipMonth").addEventListener("change", () => {
