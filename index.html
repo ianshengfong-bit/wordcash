@@ -3,50 +3,87 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#173d33">
+<meta name="theme-color" content="#0ca47a">
 <meta name="description" content="YAO 薪資管家：加班費試算、請假扣薪、每月實領與年度收入">
 <title>YAO 薪資管家</title>
+<script>
+    // 外觀：預設明亮；可在設定改成深色或跟隨系統（只記在這台裝置）。
+    try {
+        document.documentElement.dataset.theme = localStorage.getItem("YAO_UI_THEME_V3") || "light";
+    } catch (error) {
+        document.documentElement.dataset.theme = "light";
+    }
+</script>
 <style>
 /* =====================================================
    色彩與基礎
 ===================================================== */
 :root {
-    --bg: #f4f3ee;
+    --bg: #f5f8f7;
     --surface: #ffffff;
-    --surface-2: #f8f7f3;
-    --ink: #1b2521;
-    --ink-2: #47524d;
-    --muted: #7a847f;
-    --line: #e5e3da;
-    --line-2: #efeee7;
+    --surface-2: #f2f6f4;
+    --ink: #14201b;
+    --ink-2: #3f4d47;
+    --muted: #71807a;
+    --line: #dfe7e3;
+    --line-2: #ebf0ed;
 
-    --brand: #1f4d40;
-    --brand-2: #2c6b59;
-    --brand-soft: #e4efe9;
+    --brand: #0c8f67;
+    --brand-2: #0a7a58;
+    --brand-soft: #e1f6ed;
     --on-brand: #ffffff;
 
-    --gold: #b3862b;
-    --gold-soft: #f7efdc;
-    --blue: #3a6ea5;
-    --blue-soft: #e6eef7;
-    --red: #bf4a3f;
-    --red-soft: #fbeceA;
-    --green: #1d7a57;
+    --gold: #a97a1c;
+    --gold-soft: #fdf3d9;
+    --blue: #2f6fb3;
+    --blue-soft: #e4effb;
+    --red: #cf4436;
+    --red-soft: #fdecea;
+    --green: #0c8f67;
 
-    --c-base: #2c6b59;
-    --c-ot: #d6a43a;
-    --c-other: #6c9bd0;
-    --c-bonus: #c9704c;
+    --c-base: #12a97c;
+    --c-ot: #f0b63f;
+    --c-other: #5b9be0;
+    --c-bonus: #ee7d52;
+    --c-mileage: #9a7fe0;
 
-    --shadow: 0 1px 2px rgba(27, 37, 33, .04), 0 8px 24px rgba(27, 37, 33, .06);
+    --hero-bg: radial-gradient(120% 140% at 100% 0%, rgba(255, 255, 255, .30) 0, rgba(255, 255, 255, 0) 48%), linear-gradient(135deg, #14bd8a 0%, #0ca47a 52%, #0a9488 100%);
+    --hero-shadow: 0 18px 40px rgba(12, 164, 122, .28);
+    --shadow: 0 1px 2px rgba(20, 32, 27, .04), 0 8px 24px rgba(20, 32, 27, .06);
     --r-lg: 22px;
     --r-md: 16px;
     --r-sm: 11px;
     --num: ui-rounded, "SF Pro Rounded", -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
 }
 
+/* 深色：設定裡選「深色」，或選「跟隨系統」且系統為深色時套用 */
+:root[data-theme="dark"] {
+    --bg: #0f1412;
+    --surface: #171e1b;
+    --surface-2: #1d2622;
+    --ink: #e9eeeb;
+    --ink-2: #c2cbc6;
+    --muted: #8c9892;
+    --line: #29332f;
+    --line-2: #222b27;
+    --brand: #1f9e79;
+    --brand-2: #4cc7a2;
+    --brand-soft: #173128;
+    --gold: #dcb45a;
+    --gold-soft: #322a17;
+    --blue: #7fb0e2;
+    --blue-soft: #1a2836;
+    --red: #ee8479;
+    --red-soft: #3a1f1c;
+    --green: #5cc79e;
+    --c-base: #2fae88;
+    --hero-bg: radial-gradient(120% 140% at 100% 0%, rgba(255, 255, 255, .12) 0, rgba(255, 255, 255, 0) 46%), linear-gradient(135deg, #0e6b52 0%, #0f7d61 55%, #0d7a72 100%);
+    --hero-shadow: 0 18px 40px rgba(0, 0, 0, .35);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+}
+
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root[data-theme="auto"] {
         --bg: #0f1412;
         --surface: #171e1b;
         --surface-2: #1d2622;
@@ -55,12 +92,9 @@
         --muted: #8c9892;
         --line: #29332f;
         --line-2: #222b27;
-
-        --brand: #3d9079;
-        --brand-2: #56ab93;
-        --brand-soft: #1c2f29;
-        --on-brand: #ffffff;
-
+        --brand: #1f9e79;
+        --brand-2: #4cc7a2;
+        --brand-soft: #173128;
         --gold: #dcb45a;
         --gold-soft: #322a17;
         --blue: #7fb0e2;
@@ -68,8 +102,9 @@
         --red: #ee8479;
         --red-soft: #3a1f1c;
         --green: #5cc79e;
-
-        --c-base: #4aa58c;
+        --c-base: #2fae88;
+        --hero-bg: radial-gradient(120% 140% at 100% 0%, rgba(255, 255, 255, .12) 0, rgba(255, 255, 255, 0) 46%), linear-gradient(135deg, #0e6b52 0%, #0f7d61 55%, #0d7a72 100%);
+        --hero-shadow: 0 18px 40px rgba(0, 0, 0, .35);
         --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
     }
 }
@@ -123,8 +158,8 @@ h1, h2, h3, p { margin: 0; }
     display: grid;
     place-items: center;
     border-radius: 12px;
-    background: linear-gradient(145deg, #1f4d40, #2f7461);
-    color: #f3d892;
+    background: linear-gradient(145deg, #14bd8a, #0a9488);
+    color: #ffffff;
     font-family: var(--num);
     font-weight: 800;
     font-size: 19px;
@@ -250,13 +285,11 @@ h1, h2, h3, p { margin: 0; }
     padding: 26px 26px 22px;
     border-radius: var(--r-lg);
     color: #fff;
-    background:
-        radial-gradient(120% 140% at 100% 0%, rgba(243, 216, 146, .20) 0, rgba(243, 216, 146, 0) 46%),
-        linear-gradient(140deg, #14352d 0%, #1f4d40 55%, #2a6453 100%);
-    box-shadow: 0 18px 40px rgba(20, 53, 45, .22);
+    background: var(--hero-bg);
+    box-shadow: var(--hero-shadow);
 }
 
-.hero-kicker { font-size: 13px; letter-spacing: .08em; color: rgba(255, 255, 255, .72); }
+.hero-kicker { font-size: 13px; letter-spacing: .08em; color: rgba(255, 255, 255, .88); }
 
 .hero-total {
     margin-top: 6px;
@@ -268,8 +301,8 @@ h1, h2, h3, p { margin: 0; }
     letter-spacing: -.01em;
 }
 
-.hero-sub { margin-top: 8px; font-size: 13.5px; color: rgba(255, 255, 255, .78); }
-.hero-sub strong { color: #f3d892; font-family: var(--num); font-weight: 700; }
+.hero-sub { margin-top: 8px; font-size: 13.5px; color: rgba(255, 255, 255, .9); }
+.hero-sub strong { color: #fff6c9; font-family: var(--num); font-weight: 700; }
 
 .hero-chips {
     display: grid;
@@ -281,14 +314,14 @@ h1, h2, h3, p { margin: 0; }
 .chip {
     padding: 11px 13px;
     border-radius: 14px;
-    background: rgba(255, 255, 255, .09);
-    border: 1px solid rgba(255, 255, 255, .10);
+    background: rgba(255, 255, 255, .17);
+    border: 1px solid rgba(255, 255, 255, .22);
     min-width: 0;
 }
 
-.chip span { display: block; font-size: 12px; color: rgba(255, 255, 255, .68); }
+.chip span { display: block; font-size: 12px; color: rgba(255, 255, 255, .86); }
 .chip strong { display: block; margin-top: 3px; font-family: var(--num); font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chip.neg strong { color: #ffc2b8; }
+.chip.neg strong { color: #ffe3de; }
 
 /* =====================================================
    卡片與區塊
@@ -441,9 +474,9 @@ h1, h2, h3, p { margin: 0; }
 .kpi span { display: block; font-size: 12.5px; color: var(--muted); }
 .kpi strong { display: block; margin-top: 6px; font-family: var(--num); font-variant-numeric: tabular-nums; font-size: clamp(19px, 2.6vw, 25px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi small { display: block; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
-.kpi.lead { background: linear-gradient(140deg, #14352d, #24584a); border-color: transparent; color: #fff; }
-.kpi.lead span, .kpi.lead small { color: rgba(255, 255, 255, .72); }
-.kpi.lead strong { color: #f3d892; }
+.kpi.lead { background: var(--hero-bg); border-color: transparent; color: #fff; box-shadow: var(--hero-shadow); }
+.kpi.lead span, .kpi.lead small { color: rgba(255, 255, 255, .9); }
+.kpi.lead strong { color: #ffffff; }
 
 .chart { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; align-items: end; height: 210px; padding-top: 22px; }
 .bar-col { position: relative; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border: 0; background: transparent; padding: 0; min-width: 0; }
@@ -465,6 +498,7 @@ table.ledger td:first-child { font-weight: 700; }
 table.ledger tr.blank td { color: var(--muted); }
 table.ledger tr.sum td { border-bottom: 0; border-top: 2px solid var(--line); font-weight: 800; }
 table.ledger td.net { font-weight: 800; color: var(--brand-2); }
+table.ledger td.cash { color: var(--c-mileage); font-weight: 700; }
 table.ledger td.neg { color: var(--red); }
 table.ledger td.pos { color: var(--green); }
 table.ledger .memo { display: block; font-family: inherit; font-size: 11.5px; font-weight: 500; color: var(--muted); white-space: normal; max-width: 220px; }
@@ -732,7 +766,7 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
         <section class="card">
             <div class="card-head">
                 <div>
-                    <h2>里程補助</h2>
+                    <h2>里程補助（現金）</h2>
                     <div class="sub" id="mileageSummary"></div>
                 </div>
                 <button class="btn sm" type="button" data-action="add-mileage">＋ 新增</button>
@@ -784,6 +818,7 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
                 <span><i style="background:var(--c-ot)"></i>加班費</span>
                 <span><i style="background:var(--c-other)"></i>津貼／其他</span>
                 <span><i style="background:var(--c-bonus)"></i>獎金／年終</span>
+                <span><i style="background:var(--c-mileage)"></i>里程淨利（現金）</span>
             </div>
         </section>
 
@@ -791,7 +826,7 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
             <div class="card-head">
                 <div>
                     <h2>月薪明細</h2>
-                    <div class="sub">實領＝應發 − 扣款；「試算」是出勤試算分頁算出的薪資入帳</div>
+                    <div class="sub">實領是薪轉入帳；里程淨利是現金（補助 − 管銷），不在薪資單上，但計入總收入</div>
                 </div>
             </div>
             <div class="table-wrap">
@@ -910,14 +945,14 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
                     <div class="field"><label for="mileageKmInput">公里數</label><input id="mileageKmInput" type="number" min="0" step="0.1" inputmode="decimal" required></div>
                     <div class="field"><label for="mileageRate">公司補助／公里</label><input id="mileageRate" type="number" min="0" step="0.1" inputmode="decimal"></div>
                     <div class="field">
-                        <label for="mileageWearRate">每公里損耗</label>
+                        <label for="mileageWearRate">每公里管銷</label>
                         <input id="mileageWearRate" type="number" min="0" step="0.1" inputmode="decimal" placeholder="例如 3">
-                        <div class="hint">有填寫時：公里 × 每公里損耗</div>
+                        <div class="hint">油錢、保養、折舊等成本；補助扣掉這個才是淨利</div>
                     </div>
                     <div class="field full">
-                        <label for="mileageWearInput">固定損耗</label>
+                        <label for="mileageWearInput">固定管銷</label>
                         <input id="mileageWearInput" type="number" min="0" step="1" inputmode="numeric">
-                        <div class="hint">沒有填每公里損耗時才使用</div>
+                        <div class="hint">沒有填每公里管銷時才使用</div>
                     </div>
                     <div class="field full"><label for="mileageNote">備註</label><textarea id="mileageNote" placeholder="例如：台中 → 豐原"></textarea></div>
                 </div>
@@ -1111,9 +1146,29 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
                     </div>
                 </div>
 
+                <div class="group-title"><span>里程補助</span></div>
+                <div class="fields">
+                    <div class="field"><label for="setMileageRate">公司補助／公里</label><input id="setMileageRate" type="number" min="0" step="0.1" inputmode="decimal"></div>
+                    <div class="field"><label for="setMileageWear">每公里管銷</label><input id="setMileageWear" type="number" min="0" step="0.1" inputmode="decimal"></div>
+                    <div class="field full"><div class="hint" id="mileageHint"></div></div>
+                </div>
+
                 <div class="group-title"><span>每月固定項目</span><button class="btn ghost sm" type="button" data-action="set-add-fixed">＋ 新增</button></div>
                 <div class="rows" id="fixedRows"></div>
                 <div class="hint" style="margin-top:6px">每個月都會自動計入試算，例如：勞保自付、健保自付、眷屬健保、伙食津貼。</div>
+
+                <div class="group-title"><span>外觀</span></div>
+                <div class="fields">
+                    <div class="field full">
+                        <label for="themeSelect">畫面配色</label>
+                        <select id="themeSelect">
+                            <option value="light">明亮</option>
+                            <option value="dark">深色</option>
+                            <option value="auto">跟隨系統</option>
+                        </select>
+                        <div class="hint">只影響這台裝置。</div>
+                    </div>
+                </div>
             </div>
             <div class="sheet-foot">
                 <button class="btn" type="button" data-action="close">取消</button>

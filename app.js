@@ -25,6 +25,7 @@ const SETTINGS_KEY = "YAO_OVERTIME_SETTINGS_V1";
 const MILEAGE_STORAGE_KEY = "YAO_MILEAGE_RECORDS_V1";
 const RECORD_SORT_KEY = "YAO_OVERTIME_RECORD_SORT_V1";
 const TAB_KEY = "YAO_UI_TAB_V3";
+const THEME_KEY = "YAO_UI_THEME_V3";
 
 const DEFAULT_SETTINGS = {
     salary: 40000,
@@ -35,7 +36,9 @@ const DEFAULT_SETTINGS = {
     otLimit: 46,
     dayDivisor: 30,
     fullAttendance: 0,
-    fullAttendanceIncluded: true
+    fullAttendanceIncluded: true,
+    mileageRate: 6,
+    mileageWearRate: 3
 };
 
 const LEAVE_TYPES = {
@@ -52,8 +55,7 @@ const SLIP_TEMPLATE = {
     income: [
         { key: "base", name: "基本薪資" },
         { key: "ot", name: "加班費" },
-        { key: "allow", name: "獎金／津貼" },
-        { key: "mileage", name: "里程補助" }
+        { key: "allow", name: "獎金／津貼" }
     ],
     deduct: [
         { key: "labor", name: "勞保費" },
@@ -125,6 +127,8 @@ function normaliseSettings(source) {
     s.fullAttendance = Math.max(0, num(s.fullAttendance));
     s.fullAttendanceIncluded = s.fullAttendanceIncluded !== false;
     s.earlyOvertime = s.earlyOvertime !== false;
+    s.mileageRate = Math.max(0, num(s.mileageRate));
+    s.mileageWearRate = Math.max(0, num(s.mileageWearRate));
 
     ["salaryHistory", "leaves", "monthItems", "fixedItems", "bonuses"].forEach(key => {
         s[key] = Array.isArray(s[key]) ? s[key] : [];
@@ -866,7 +870,7 @@ function renderHero(c) {
             <div class="chip"><span>加班費</span><strong>${money(c.overtimePay)}</strong></div>
             <div class="chip"><span>補貼／獎金</span><strong>${money(c.extraIncome)}</strong></div>
             <div class="chip ${c.totalDeduct > 0 ? "neg" : ""}"><span>請假與扣款</span><strong>${c.totalDeduct > 0 ? "−" : ""}${money(c.totalDeduct)}</strong></div>
-            <div class="chip"><span>里程淨收入</span><strong>${money(c.mileageNet)}</strong></div>
+            <div class="chip"><span>里程淨利（現金）</span><strong>${money(c.mileageNet)}</strong></div>
         </div>
     `;
 }
@@ -934,7 +938,7 @@ function renderBreakdown(c) {
 
     rows.push(`
         <div class="line muted-total">
-            <span>＋ 里程淨收入</span>
+            <span>＋ 里程淨利<small>現金，不入薪轉</small></span>
             <strong>${money(c.mileageNet)}</strong>
         </div>
         <div class="line muted-total">
@@ -1095,8 +1099,8 @@ function mileageItemHTML(record) {
     const r = calculateMileage(record);
     const id = escapeHTML(record.id);
     const wearText = r.wearRate > 0
-        ? `損耗 ${numberText(r.km, 1)} km × ${r.wearRate}`
-        : `固定損耗 ${money(r.fixedWear)}`;
+        ? `管銷 ${numberText(r.km, 1)} km × ${money(r.wearRate)}`
+        : `固定管銷 ${money(r.fixedWear)}`;
 
     return `
         <div class="item">
@@ -1155,7 +1159,7 @@ function renderMileage(c) {
 
     if ($("mileageSummary")) {
         $("mileageSummary").textContent =
-            `${numberText(c.mileageKm, 1)} km ・ 補助 ${money(c.mileageGross)} − 損耗 ${money(c.mileageWear)} ＝ 淨收入 ${money(c.mileageNet)}`;
+            `${numberText(c.mileageKm, 1)} km ・ 補助 ${money(c.mileageGross)} − 管銷 ${money(c.mileageWear)} ＝ 淨利 ${money(c.mileageNet)}`;
     }
 
     el.innerHTML = list.length
@@ -1534,13 +1538,11 @@ function openMileage(id = null, date = null) {
         $("mileageWearInput").value = record.wear ?? 0;
         $("mileageNote").value = record.note || "";
     } else {
-        // 新增時沿用上一筆的補助與損耗設定。
-        const last = sortByDate(mileageRecords, "desc")[0];
-
         $("mileageModalTitle").textContent = "新增里程";
         $("mileageDate").value = date || defaultDate();
-        $("mileageRate").value = last?.rate ?? 6;
-        $("mileageWearRate").value = num(last?.wearRate) > 0 ? last.wearRate : "";
+        // 新增時帶入設定裡的每公里補助與管銷。
+        $("mileageRate").value = settings.mileageRate;
+        $("mileageWearRate").value = settings.mileageWearRate > 0 ? settings.mileageWearRate : "";
         $("mileageWearInput").value = 0;
     }
 
@@ -1567,8 +1569,8 @@ function updateMileagePreview() {
 
     preview.innerHTML = `
         補助 <strong>${money(r.gross)}</strong>
-        − 損耗 <strong>${money(r.wear)}</strong>
-        ＝ 實際收入 <strong>${money(r.net)}</strong>
+        − 管銷 <strong>${money(r.wear)}</strong>
+        ＝ 淨利 <strong>${money(r.net)}</strong>（現金，計入總收入）
     `;
 }
 
@@ -1734,6 +1736,12 @@ function updateSalaryHint() {
 
     $("salaryHint").textContent =
         `時薪 ${money(hourly)}・日薪 ${money(salary / divisor)}・加班第 1–2 小時每小時 ${money(hourly * 1.34)}`;
+
+    const rate = Math.max(0, num($("setMileageRate").value));
+    const wear = Math.max(0, num($("setMileageWear").value));
+
+    $("mileageHint").textContent =
+        `每公里淨利 ${money(Math.max(0, rate - wear))}（補助 ${money(rate)} − 管銷 ${money(wear)}）。新增里程時自動帶入；里程是現金，不算進薪轉，但會計入總收入。`;
 }
 
 function openSettings() {
@@ -1746,6 +1754,9 @@ function openSettings() {
     $("fullAttendance").value = settings.fullAttendance;
     $("fullAttendanceIncluded").checked = settings.fullAttendanceIncluded;
     $("dayDivisor").value = settings.dayDivisor;
+    $("setMileageRate").value = settings.mileageRate;
+    $("setMileageWear").value = settings.mileageWearRate;
+    $("themeSelect").value = getTheme();
 
     $("salaryHistoryRows").innerHTML = settings.salaryHistory.map(historyRowHTML).join("");
     $("fixedRows").innerHTML = settings.fixedItems.map(fixedRowHTML).join("");
@@ -1785,15 +1796,30 @@ function saveSettings(event) {
         fullAttendance: Math.max(0, num($("fullAttendance").value)),
         fullAttendanceIncluded: $("fullAttendanceIncluded").checked,
         dayDivisor: num($("dayDivisor").value) > 0 ? num($("dayDivisor").value) : 30,
+        mileageRate: Math.max(0, num($("setMileageRate").value)),
+        mileageWearRate: Math.max(0, num($("setMileageWear").value)),
         salaryHistory,
         fixedItems
     });
+
+    setTheme($("themeSelect").value);
 
     saveData();
     closeModals();
     resetQuickStart();
     renderAll();
     toast("設定已儲存");
+}
+
+function getTheme() {
+    const theme = localStorage.getItem(THEME_KEY);
+    return theme === "dark" || theme === "auto" ? theme : "light";
+}
+
+function setTheme(theme) {
+    const value = theme === "dark" || theme === "auto" ? theme : "light";
+    localStorage.setItem(THEME_KEY, value);
+    document.documentElement.dataset.theme = value;
 }
 
 function resetQuickStart() {
@@ -1845,12 +1871,17 @@ function yearStats(year) {
             .filter(item => getMonthFromDate(item.date) === month)
             .reduce((sum, item) => sum + num(item.amount), 0);
 
+        const calc = computeMonth(month);
+
         months.push({
             month,
             index: m,
             slip,
             totals: slip ? slipTotals(slip) : null,
-            bonus
+            bonus,
+            calc,
+            // 里程是現金：補助扣掉管銷後的淨利，不在薪資單上。
+            mileage: calc.mileageNet
         });
     }
 
@@ -1864,6 +1895,10 @@ function yearStats(year) {
     const otTotal = sum(filled, item => item.totals.ot);
     const bonusTotal = sum(months, item => item.bonus);
     const bonusCount = settings.bonuses.filter(item => String(item.date || "").startsWith(year + "-")).length;
+
+    const mileageTotal = sum(months, item => item.mileage);
+    const mileageGross = sum(months, item => item.calc.mileageGross);
+    const mileageWear = sum(months, item => item.calc.mileageWear);
 
     const avgNet = full.length ? sum(full, item => item.totals.net) / full.length : 0;
 
@@ -1890,9 +1925,12 @@ function yearStats(year) {
         bonusTotal,
         bonusCount,
         avgNet,
-        yearTotal: netTotal + bonusTotal,
+        mileageTotal,
+        mileageGross,
+        mileageWear,
+        yearTotal: netTotal + bonusTotal + mileageTotal,
         remaining,
-        projection: netTotal + bonusTotal + recentAvg * remaining,
+        projection: netTotal + bonusTotal + mileageTotal + recentAvg * remaining,
         best
     };
 }
@@ -1929,14 +1967,14 @@ function renderKpis(s) {
 
     el.innerHTML = `
         <div class="kpi lead">
-            <span>年度實領總額</span>
+            <span>年度總收入</span>
             <strong>${signedMoney(s.yearTotal)}</strong>
-            <small>月薪 ${money(s.netTotal)} ＋ 獎金 ${money(s.bonusTotal)}</small>
+            <small>薪轉 ${money(s.netTotal)} ＋ 獎金 ${money(s.bonusTotal)} ＋ 里程現金 ${money(s.mileageTotal)}</small>
         </div>
         <div class="kpi">
-            <span>月平均實領</span>
+            <span>月平均實領（薪轉）</span>
             <strong>${money(s.avgNet)}</strong>
-            <small>${s.full.length} 個整月平均，不含獎金</small>
+            <small>${s.full.length} 個整月平均，不含獎金與里程</small>
         </div>
         <div class="kpi">
             <span>${s.remaining > 0 ? "預估全年收入" : "年度應發總額"}</span>
@@ -1944,9 +1982,9 @@ function renderKpis(s) {
             <small>${s.remaining > 0 ? `剩 ${s.remaining} 個月以近期平均推估` : `已填 ${count} 個月`}</small>
         </div>
         <div class="kpi">
-            <span>含獎金月平均</span>
-            <strong>${money(count ? s.yearTotal / count : 0)}</strong>
-            <small>年度實領 ÷ ${count} 個月</small>
+            <span>里程淨利（現金）</span>
+            <strong>${money(s.mileageTotal)}</strong>
+            <small>補助 ${money(s.mileageGross)} − 管銷 ${money(s.mileageWear)}</small>
         </div>
         <div class="kpi">
             <span>加班費合計</span>
@@ -1976,7 +2014,7 @@ function renderChart(s) {
     const axis = $("chartX");
     if (!chart || !axis) return;
 
-    const heights = s.months.map(item => (item.totals ? Math.max(0, item.totals.income) : 0) + item.bonus);
+    const heights = s.months.map(item => (item.totals ? Math.max(0, item.totals.income) : 0) + item.bonus + item.mileage);
     const max = Math.max(1, ...heights);
 
     chart.innerHTML = s.months.map((item, i) => {
@@ -1995,13 +2033,15 @@ function renderChart(s) {
             [t ? t.base : 0, "var(--c-base)"],
             [t ? t.ot : 0, "var(--c-ot)"],
             [t ? Math.max(0, t.other) : 0, "var(--c-other)"],
-            [item.bonus, "var(--c-bonus)"]
+            [item.bonus, "var(--c-bonus)"],
+            [item.mileage, "var(--c-mileage)"]
         ].filter(seg => seg[0] > 0);
 
-        const net = (t ? t.net : 0) + item.bonus;
-        const tip = `${item.index} 月：實領 ${money(net)}` +
-            (t ? `（應發 ${money(t.income)}、扣款 ${money(t.deduct)}）` : "") +
-            (item.bonus ? `、獎金 ${money(item.bonus)}` : "");
+        const net = (t ? t.net : 0) + item.bonus + item.mileage;
+        const tip = `${item.index} 月：總收入 ${money(net)}` +
+            (t ? `（薪轉 ${money(t.net)}：應發 ${money(t.income)}、扣款 ${money(t.deduct)}）` : "") +
+            (item.bonus ? `、獎金 ${money(item.bonus)}` : "") +
+            (item.mileage ? `、里程現金 ${money(item.mileage)}` : "");
 
         return `
             <button class="bar-col" type="button" data-action="edit-slip" data-month="${item.month}" title="${escapeHTML(tip)}">
@@ -2021,16 +2061,19 @@ function renderLedgerTable(s) {
     if (!el) return;
 
     const rows = s.months.map(item => {
-        const calc = computeMonth(item.month);
+        const calc = item.calc;
         const estimate = calc.hasData ? calc.payNet : null;
+        const cash = item.mileage > 0 ? money(item.mileage) : "—";
 
         if (!item.slip) {
             return `
                 <tr class="blank">
                     <td>${item.index} 月</td>
+                    <td class="col-hide">—</td>
+                    <td class="col-hide">—</td>
                     <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
+                    <td class="cash">${cash}</td>
+                    <td>${item.mileage > 0 ? money(item.mileage) : "—"}</td>
                     <td class="col-hide">${estimate === null ? "—" : money(estimate)}</td>
                     <td class="col-hide">—</td>
                     <td><button class="btn sm" type="button" data-action="edit-slip" data-month="${item.month}">填寫</button></td>
@@ -2045,9 +2088,11 @@ function renderLedgerTable(s) {
         return `
             <tr>
                 <td>${item.index} 月${memo ? `<span class="memo">${escapeHTML(memo)}</span>` : ""}</td>
-                <td>${money(t.income)}</td>
-                <td class="${t.deduct > 0 ? "neg" : ""}">${t.deduct > 0 ? "−" + money(t.deduct) : "$0"}</td>
-                <td class="net">${signedMoney(t.net)}</td>
+                <td class="col-hide">${money(t.income)}</td>
+                <td class="col-hide ${t.deduct > 0 ? "neg" : ""}">${t.deduct > 0 ? "−" + money(t.deduct) : "$0"}</td>
+                <td>${signedMoney(t.net)}</td>
+                <td class="cash">${cash}</td>
+                <td class="net">${signedMoney(t.net + item.mileage)}</td>
                 <td class="col-hide">${estimate === null ? "—" : money(estimate)}</td>
                 <td class="col-hide ${diff === null || Math.round(diff) === 0 ? "" : diff > 0 ? "pos" : "neg"}">${diff === null ? "—" : (diff > 0 ? "+" : "") + signedMoney(diff)}</td>
                 <td><button class="btn sm" type="button" data-action="edit-slip" data-month="${item.month}">編輯</button></td>
@@ -2059,9 +2104,11 @@ function renderLedgerTable(s) {
         <thead>
             <tr>
                 <th>月份</th>
-                <th>應發</th>
-                <th>扣款</th>
-                <th>實領</th>
+                <th class="col-hide">應發</th>
+                <th class="col-hide">扣款</th>
+                <th>實領（薪轉）</th>
+                <th>里程（現金）</th>
+                <th>合計</th>
                 <th class="col-hide">試算</th>
                 <th class="col-hide">差額</th>
                 <th></th>
@@ -2071,9 +2118,11 @@ function renderLedgerTable(s) {
             ${rows.join("")}
             <tr class="sum">
                 <td>全年合計</td>
-                <td>${money(s.incomeTotal)}</td>
-                <td class="${s.deductTotal > 0 ? "neg" : ""}">${s.deductTotal > 0 ? "−" : ""}${money(s.deductTotal)}</td>
-                <td class="net">${signedMoney(s.netTotal)}</td>
+                <td class="col-hide">${money(s.incomeTotal)}</td>
+                <td class="col-hide ${s.deductTotal > 0 ? "neg" : ""}">${s.deductTotal > 0 ? "−" : ""}${money(s.deductTotal)}</td>
+                <td>${signedMoney(s.netTotal)}</td>
+                <td class="cash">${money(s.mileageTotal)}</td>
+                <td class="net">${signedMoney(s.netTotal + s.mileageTotal)}</td>
                 <td class="col-hide"></td>
                 <td class="col-hide"></td>
                 <td></td>
@@ -2239,7 +2288,6 @@ function fillSlipFromCalc() {
 
     setSlipRow("slipIncome", byKey("base"), "基本薪資", c.salary + c.faBonus - c.attendanceDeduct, "base");
     setSlipRow("slipIncome", byKey("ot"), "加班費", c.overtimePay, "ot");
-    setSlipRow("slipIncome", byKey("mileage"), "里程補助", c.mileageGross, "mileage");
 
     settings.fixedItems.forEach(item => {
         if (!item.name) return;
