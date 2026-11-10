@@ -1,12 +1,16 @@
 /* =========================================================
-   YAO 加班費計算器 V2.0
-   PDF 薪資單精修版
+   YAO 薪資管家 V3.0
 
-   注意：
-   1. 不修改原有 Storage Key
-   2. 不修改既有資料結構
-   3. 不修改加班費計算邏輯
-   4. 本版本主要優化 PDF 排版與視覺
+   沿用 V2 的儲存位置與資料格式（出勤、里程、設定），
+   舊資料可直接使用。V3 新增的資料都放在 settings 裡，
+   所以雲端同步與備份檔不需要更動：
+
+   settings.salaryHistory  調薪前的月薪  [{ until, salary }]
+   settings.leaves         請假／未上班  [{ id, date, type, hours, pct, breakFA, note }]
+   settings.monthItems     單月補貼／扣款 [{ id, month, kind, name, amount }]
+   settings.fixedItems     每月固定項目  [{ id, kind, name, amount }]
+   settings.payslips       每月實領      { "YYYY-MM": { income, deduct, received, partial, note } }
+   settings.bonuses        獎金／年終    [{ id, date, name, amount, note }]
 ========================================================= */
 
 "use strict";
@@ -20,17 +24,44 @@ const STORAGE_KEY = "YAO_OVERTIME_RECORDS_V1";
 const SETTINGS_KEY = "YAO_OVERTIME_SETTINGS_V1";
 const MILEAGE_STORAGE_KEY = "YAO_MILEAGE_RECORDS_V1";
 const RECORD_SORT_KEY = "YAO_OVERTIME_RECORD_SORT_V1";
-
-
-/* =========================================================
-   DEFAULT SETTINGS
-========================================================= */
+const TAB_KEY = "YAO_UI_TAB_V3";
 
 const DEFAULT_SETTINGS = {
     salary: 40000,
     normalStart: "08:00",
     normalEnd: "17:30",
-    overtimeStart: "17:30"
+    overtimeStart: "17:30",
+    earlyOvertime: true,
+    otLimit: 46,
+    dayDivisor: 30,
+    fullAttendance: 0,
+    fullAttendanceIncluded: true
+};
+
+const LEAVE_TYPES = {
+    typhoon: { label: "颱風假", pct: 100, breakFA: false },
+    personal: { label: "事假", pct: 100, breakFA: true },
+    sick: { label: "病假", pct: 50, breakFA: true },
+    absent: { label: "曠職", pct: 100, breakFA: true },
+    unpaid: { label: "無薪假／停工", pct: 100, breakFA: false },
+    annual: { label: "特休／有薪假", pct: 0, breakFA: false },
+    other: { label: "其他", pct: 100, breakFA: false }
+};
+
+const SLIP_TEMPLATE = {
+    income: [
+        { key: "base", name: "基本薪資" },
+        { key: "ot", name: "加班費" },
+        { key: "allow", name: "獎金／津貼" },
+        { key: "mileage", name: "里程補助" }
+    ],
+    deduct: [
+        { key: "labor", name: "勞保費" },
+        { key: "health", name: "健保費" },
+        { key: "dep", name: "眷屬健保" },
+        { key: "tax", name: "所得稅" },
+        { key: "other", name: "其他扣款" }
+    ]
 };
 
 
@@ -42,74 +73,87 @@ function $(id) {
     return document.getElementById(id);
 }
 
+function num(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+}
 
 function loadJSON(key, fallback) {
     try {
         const value = localStorage.getItem(key);
-
-        if (!value) {
-            return fallback;
-        }
-
-        return JSON.parse(value);
-
+        return value ? JSON.parse(value) : fallback;
     } catch (error) {
-
-        console.error(
-            "讀取資料失敗：",
-            key,
-            error
-        );
-
+        console.error("讀取資料失敗：", key, error);
         return fallback;
     }
 }
 
-
 function saveJSON(key, value) {
-
     try {
-
-        localStorage.setItem(
-            key,
-            JSON.stringify(value)
-        );
-
+        localStorage.setItem(key, JSON.stringify(value));
     } catch (error) {
-
-        console.error(
-            "儲存資料失敗：",
-            key,
-            error
-        );
-
-        alert(
-            "資料儲存失敗，請確認瀏覽器儲存空間。"
-        );
+        console.error("儲存資料失敗：", key, error);
+        alert("資料儲存失敗，請確認瀏覽器儲存空間。");
     }
 }
 
+function saveLocal() {
+    saveJSON(STORAGE_KEY, records);
+    saveJSON(SETTINGS_KEY, settings);
+    saveJSON(MILEAGE_STORAGE_KEY, mileageRecords);
+}
 
 function saveData() {
-
-    saveJSON(
-        STORAGE_KEY,
-        records
-    );
-
-    saveJSON(
-        SETTINGS_KEY,
-        settings
-    );
-
-    saveJSON(
-        MILEAGE_STORAGE_KEY,
-        mileageRecords
-    );
-
+    saveLocal();
     // 雲端同步模組未載入或尚未啟用時，這一行不會做任何事。
     window.YaoCloudSync?.schedulePush();
 }
+
+function normaliseSettings(source) {
+    const s = {
+        ...DEFAULT_SETTINGS,
+        ...(source && typeof source === "object" ? source : {})
+    };
+
+    s.salary = Math.max(0, num(s.salary));
+    s.dayDivisor = num(s.dayDivisor) > 0 ? num(s.dayDivisor) : 30;
+    s.otLimit = Math.max(0, num(s.otLimit));
+    s.fullAttendance = Math.max(0, num(s.fullAttendance));
+    s.fullAttendanceIncluded = s.fullAttendanceIncluded !== false;
+    s.earlyOvertime = s.earlyOvertime !== false;
+
+    ["salaryHistory", "leaves", "monthItems", "fixedItems", "bonuses"].forEach(key => {
+        s[key] = Array.isArray(s[key]) ? s[key] : [];
+    });
+
+    s.payslips =
+        s.payslips && typeof s.payslips === "object" && !Array.isArray(s.payslips)
+            ? s.payslips
+            : {};
+
+    return s;
+}
+
+
+/* =========================================================
+   STATE
+========================================================= */
+
+let records = loadJSON(STORAGE_KEY, []);
+let mileageRecords = loadJSON(MILEAGE_STORAGE_KEY, []);
+let settings = normaliseSettings(loadJSON(SETTINGS_KEY, {}));
+
+if (!Array.isArray(records)) records = [];
+if (!Array.isArray(mileageRecords)) mileageRecords = [];
+
+let selectedMonth = "";
+let selectedYear = new Date().getFullYear();
+let recordSortOrder = localStorage.getItem(RECORD_SORT_KEY) || "desc";
+let activeTab = localStorage.getItem(TAB_KEY) === "ledger" ? "ledger" : "calc";
 
 
 function escapeHTML(value) {
@@ -493,1040 +537,651 @@ function getMonthMileageRecords() {
 }
 
 
+
+/* =========================================================
+   月份切換
+========================================================= */
+
+function shiftMonth(month, offset) {
+    const [y, m] = month.split("-").map(Number);
+    const date = new Date(y, m - 1 + offset, 1);
+    return date.getFullYear() + "-" + pad2(date.getMonth() + 1);
+}
+
 function changeMonth(offset) {
-
-    const parts =
-        selectedMonth.split("-");
-
-    let year =
-        Number(parts[0]);
-
-    let month =
-        Number(parts[1]);
-
-    month += offset;
-
-    if (month < 1) {
-
-        month = 12;
-
-        year--;
-    }
-
-    if (month > 12) {
-
-        month = 1;
-
-        year++;
-    }
-
-    selectedMonth =
-        year +
-        "-" +
-        pad2(month);
-
-    $("monthPicker").value =
-        selectedMonth;
-
+    selectedMonth = shiftMonth(selectedMonth, offset);
     render();
 }
 
+function inMonth(list, month) {
+    return list.filter(item => getMonthFromDate(item.date) === month);
+}
 
-/* =========================================================
-   OVERTIME CALCULATION
-========================================================= */
+function signedMoney(value) {
+    const n = Math.round(num(value));
+    return (n < 0 ? "−" : "") + money(Math.abs(n));
+}
 
-function calculatePaidHours(
-    minutes
-) {
-
-    const safeMinutes =
-        Math.max(
-            0,
-            Number(minutes) || 0
-        );
-
-    return (
-        Math.floor(
-            safeMinutes / 30
-        ) *
-        0.5
-    );
+function hoursText(value) {
+    const n = num(value);
+    return (Number.isInteger(n) ? String(n) : n.toFixed(1)) + " 小時";
 }
 
 
-function calculateRecord(
-    record
-) {
+/* =========================================================
+   月薪與時薪（支援調薪）
+========================================================= */
 
-    const start =
-        timeToMinutes(
-            record.start
-        );
+function getSalaryForMonth(month) {
+    const past = settings.salaryHistory
+        .filter(row => row && row.until && month && row.until >= month)
+        .sort((a, b) => a.until.localeCompare(b.until));
 
-    const end =
-        timeToMinutes(
-            record.end
-        );
+    return past.length ? Math.max(0, num(past[0].salary)) : num(settings.salary);
+}
 
-    let grossMinutes =
-        end - start;
-
-    if (
-        grossMinutes < 0
-    ) {
-
-        grossMinutes +=
-            24 * 60;
-    }
+function getHourlyRate(month) {
+    return getSalaryForMonth(month) / (settings.dayDivisor * 8);
+}
 
 
-    const breakMinutes =
-        Math.max(
-            0,
-            Number(
-                record.breakMinutes
-            ) || 0
-        );
+/* =========================================================
+   加班費計算
+========================================================= */
 
+function calculatePaidHours(minutes) {
+    return Math.floor(Math.max(0, num(minutes)) / 30) * 0.5;
+}
 
-    const actualWorkMinutes =
-        Math.max(
-            0,
-            grossMinutes -
-            breakMinutes
-        );
+function calculateRecord(record) {
+    const start = timeToMinutes(record.start);
+    let end = timeToMinutes(record.end);
 
+    // 下班時間早於上班時間，視為跨到隔天。
+    if (end < start) end += 24 * 60;
+
+    const grossMinutes = end - start;
+    const breakMinutes = Math.max(0, num(record.breakMinutes));
+    const actualWorkMinutes = Math.max(0, grossMinutes - breakMinutes);
 
     let overtimeMinutes = 0;
+    let earlyMinutes = 0;
+    let earlyPaidHours = 0;
+    let paidHours = 0;
 
+    if (record.dayType === "weekday") {
+        // 下班後：從「平日加班開始」算到下班。
+        const overtimeStart = timeToMinutes(settings.overtimeStart);
+        const lateMinutes = Math.max(0, end - Math.max(overtimeStart, start));
 
-    if (
-        record.dayType ===
-        "weekday"
-    ) {
-
-        const overtimeStart =
-            timeToMinutes(
-                settings.overtimeStart
-            );
-
-        let overtimeEnd =
-            end;
-
-        if (
-            overtimeEnd <
-            overtimeStart
-        ) {
-
-            overtimeEnd +=
-                24 * 60;
+        // 上班前：比「正常上班」早到的部分。
+        if (settings.earlyOvertime) {
+            const normalStart = timeToMinutes(settings.normalStart);
+            earlyMinutes = Math.max(0, Math.min(normalStart, end) - start);
         }
 
-        if (
-            overtimeEnd >
-            overtimeStart
-        ) {
-
-            overtimeMinutes =
-                overtimeEnd -
-                overtimeStart;
-        }
-
+        // 早上與晚上各自以 30 分鐘為單位計算，不互相湊數。
+        earlyPaidHours = calculatePaidHours(earlyMinutes);
+        paidHours = calculatePaidHours(lateMinutes) + earlyPaidHours;
+        overtimeMinutes = lateMinutes + earlyMinutes;
     } else {
-
-        overtimeMinutes =
-            actualWorkMinutes;
+        overtimeMinutes = actualWorkMinutes;
+        paidHours = calculatePaidHours(overtimeMinutes);
     }
 
+    const firstTwoHours = Math.min(paidHours, 2);
+    const thirdToEighth = Math.min(Math.max(paidHours - 2, 0), 6);
+    const ninthToTwelfth = Math.min(Math.max(paidHours - 8, 0), 4);
 
-    const paidHours =
-        calculatePaidHours(
-            overtimeMinutes
-        );
+    const hourlyRate = getHourlyRate(getMonthFromDate(record.date) || selectedMonth);
 
-
-    const firstTwoHours =
-        Math.min(
-            paidHours,
-            2
-        );
-
-
-    const thirdToEighth =
-        Math.min(
-            Math.max(
-                paidHours - 2,
-                0
-            ),
-            6
-        );
-
-
-    const ninthToTwelfth =
-        Math.min(
-            Math.max(
-                paidHours - 8,
-                0
-            ),
-            4
-        );
-
-
-    const hourlyRate =
-        Number(
-            settings.salary || 0
-        ) /
-        240;
-
-
-    const payFirst =
-        hourlyRate *
-        firstTwoHours *
-        1.34;
-
-
-    const paySecond =
-        hourlyRate *
-        thirdToEighth *
-        1.67;
-
-
-    const payThird =
-        hourlyRate *
-        ninthToTwelfth *
-        2.67;
-
-
-    const total =
-        payFirst +
-        paySecond +
-        payThird;
-
+    const payFirst = hourlyRate * firstTwoHours * 1.34;
+    const paySecond = hourlyRate * thirdToEighth * 1.67;
+    const payThird = hourlyRate * ninthToTwelfth * 2.67;
 
     return {
-
         grossMinutes,
-
         actualWorkMinutes,
-
         overtimeMinutes,
-
+        earlyMinutes,
+        earlyPaidHours,
         paidHours,
-
         firstTwoHours,
-
         thirdToEighth,
-
         ninthToTwelfth,
-
+        hourlyRate,
         payFirst,
-
         paySecond,
-
         payThird,
-
-        total
+        total: payFirst + paySecond + payThird
     };
 }
 
-
-/* =========================================================
-   MILEAGE
-========================================================= */
-
-function calculateMileage(
-    record
-) {
-
-    const km =
-        Math.max(
-            0,
-            Number(
-                record.km || 0
-            )
-        );
-
-
-    const rate =
-        Math.max(
-            0,
-            Number(
-                record.rate || 0
-            )
-        );
-
-
-    const wearRate =
-        Math.max(
-            0,
-            Number(
-                record.wearRate || 0
-            )
-        );
-
-
-    const fixedWear =
-        Math.max(
-            0,
-            Number(
-                record.wear || 0
-            )
-        );
-
-
-    let wear = 0;
-
-
-    if (
-        wearRate > 0
-    ) {
-
-        wear =
-            km *
-            wearRate;
-
-    } else {
-
-        wear =
-            fixedWear;
-    }
-
-
-    const gross =
-        km *
-        rate;
-
-
-    const net =
-        Math.max(
-            0,
-            gross -
-            wear
-        );
-
+function calculateMileage(record) {
+    const km = Math.max(0, num(record.km));
+    const rate = Math.max(0, num(record.rate));
+    const wearRate = Math.max(0, num(record.wearRate));
+    const fixedWear = Math.max(0, num(record.wear));
+    const wear = wearRate > 0 ? km * wearRate : fixedWear;
+    const gross = km * rate;
 
     return {
-
         km,
-
         rate,
-
         wearRate,
-
         fixedWear,
-
         wear,
-
         gross,
-
-        net
+        net: Math.max(0, gross - wear)
     };
 }
 
-
-/* =========================================================
-   DAY TYPE
-========================================================= */
-
-function getDayTypeText(
-    dayType
-) {
-
-    if (
-        dayType ===
-        "weekday"
-    ) {
-        return "平日";
-    }
-
-    if (
-        dayType ===
-        "rest"
-    ) {
-        return "休假日";
-    }
-
-    if (
-        dayType ===
-        "holiday"
-    ) {
-        return "國定／公司假日";
-    }
-
+function getDayTypeText(dayType) {
+    if (dayType === "weekday") return "平日";
+    if (dayType === "rest") return "休假日";
+    if (dayType === "holiday") return "國定／公司假日";
     return "其他";
 }
 
 
 /* =========================================================
-   RENDER
+   請假／未上班
+========================================================= */
+
+function getLeaveLabel(type) {
+    return (LEAVE_TYPES[type] || LEAVE_TYPES.other).label;
+}
+
+function calculateLeave(leave) {
+    const hours = Math.max(0, num(leave.hours));
+    const pct = Math.min(100, Math.max(0, num(leave.pct)));
+    const hourlyRate = getHourlyRate(getMonthFromDate(leave.date) || selectedMonth);
+
+    return {
+        hours,
+        pct,
+        hourlyRate,
+        deduction: hourlyRate * hours * pct / 100
+    };
+}
+
+
+/* =========================================================
+   單月試算
+========================================================= */
+
+function computeMonth(month) {
+    const monthRecords = inMonth(records, month);
+    const monthMileage = inMonth(mileageRecords, month);
+    const monthLeaves = inMonth(settings.leaves, month);
+    const monthItems = settings.monthItems.filter(item => item.month === month);
+
+    const out = {
+        month,
+        salary: getSalaryForMonth(month),
+        hourlyRate: getHourlyRate(month),
+        monthRecords,
+        monthMileage,
+        monthLeaves,
+        monthItems,
+        overtimePay: 0,
+        paidHours: 0,
+        earlyPaidHours: 0,
+        actualOvertimeMinutes: 0,
+        overtimeDays: 0,
+        weekdayHours: 0,
+        restHours: 0,
+        holidayHours: 0,
+        mileageGross: 0,
+        mileageWear: 0,
+        mileageNet: 0,
+        mileageKm: 0,
+        leaveDeduct: 0,
+        leaveHours: 0,
+        faBonus: 0,
+        faDeduct: 0,
+        faBroken: false,
+        fixedIncome: 0,
+        fixedDeduct: 0,
+        itemIncome: 0,
+        itemDeduct: 0
+    };
+
+    monthRecords.forEach(record => {
+        const r = calculateRecord(record);
+        out.overtimePay += r.total;
+        out.paidHours += r.paidHours;
+        out.earlyPaidHours += r.earlyPaidHours;
+        out.actualOvertimeMinutes += r.overtimeMinutes;
+        if (r.overtimeMinutes > 0) out.overtimeDays++;
+        if (record.dayType === "weekday") out.weekdayHours += r.paidHours;
+        else if (record.dayType === "rest") out.restHours += r.paidHours;
+        else if (record.dayType === "holiday") out.holidayHours += r.paidHours;
+    });
+
+    monthMileage.forEach(record => {
+        const r = calculateMileage(record);
+        out.mileageGross += r.gross;
+        out.mileageWear += r.wear;
+        out.mileageNet += r.net;
+        out.mileageKm += r.km;
+    });
+
+    monthLeaves.forEach(leave => {
+        const r = calculateLeave(leave);
+        out.leaveDeduct += r.deduction;
+        out.leaveHours += r.hours;
+        if (leave.breakFA) out.faBroken = true;
+    });
+
+    if (settings.fullAttendance > 0) {
+        if (settings.fullAttendanceIncluded) {
+            if (out.faBroken) out.faDeduct = settings.fullAttendance;
+        } else if (!out.faBroken) {
+            out.faBonus = settings.fullAttendance;
+        }
+    }
+
+    settings.fixedItems.forEach(item => {
+        if (item.kind === "income") out.fixedIncome += num(item.amount);
+        else out.fixedDeduct += num(item.amount);
+    });
+
+    monthItems.forEach(item => {
+        if (item.kind === "income") out.itemIncome += num(item.amount);
+        else out.itemDeduct += num(item.amount);
+    });
+
+    out.extraIncome = out.faBonus + out.fixedIncome + out.itemIncome;
+    out.attendanceDeduct = out.leaveDeduct + out.faDeduct;
+    out.otherDeduct = out.fixedDeduct + out.itemDeduct;
+    out.totalDeduct = out.attendanceDeduct + out.otherDeduct;
+
+    // 應發：公司這個月該給的薪資（不含里程）
+    out.payGross = out.salary + out.overtimePay + out.extraIncome - out.attendanceDeduct;
+    // 薪資入帳：應發再扣掉勞健保等扣款
+    out.payNet = out.payGross - out.otherDeduct;
+    // 總收入：薪資入帳加上里程淨收入
+    out.totalIncome = out.payNet + out.mileageNet;
+
+    out.hasData = Boolean(
+        monthRecords.length || monthMileage.length || monthLeaves.length || monthItems.length
+    );
+
+    return out;
+}
+
+function getPDFAdjustNote() {
+    const c = computeMonth(selectedMonth);
+    const parts = [];
+
+    if (c.extraIncome) parts.push("補貼／獎金 " + money(c.extraIncome));
+    if (c.leaveDeduct) parts.push("請假扣薪 −" + money(c.leaveDeduct));
+    if (c.faDeduct) parts.push("全勤獎金扣除 −" + money(c.faDeduct));
+    if (c.otherDeduct) parts.push("固定與其他扣款 −" + money(c.otherDeduct));
+
+    return parts.length ? "本月另計入：" + parts.join("、") + "。" : "";
+}
+
+
+/* =========================================================
+   畫面：出勤試算
 ========================================================= */
 
 function render() {
+    const c = computeMonth(selectedMonth);
 
-    const monthRecords =
-        getMonthRecords();
+    if ($("monthPicker")) $("monthPicker").value = selectedMonth;
 
-    const monthMileageRecords =
-        getMonthMileageRecords();
-
-
-    let totalPay = 0;
-
-    let paidHours = 0;
-
-    let actualOvertimeMinutes =
-        0;
-
-    let weekdayHours = 0;
-
-    let restHours = 0;
-
-    let holidayHours = 0;
-
-    let overtimeDays = 0;
-
-
-    monthRecords.forEach(
-        record => {
-
-            const result =
-                calculateRecord(
-                    record
-                );
-
-
-            totalPay +=
-                result.total;
-
-
-            paidHours +=
-                result.paidHours;
-
-
-            actualOvertimeMinutes +=
-                result.overtimeMinutes;
-
-
-            if (
-                result.overtimeMinutes >
-                0
-            ) {
-
-                overtimeDays++;
-            }
-
-
-            if (
-                record.dayType ===
-                "weekday"
-            ) {
-
-                weekdayHours +=
-                    result.paidHours;
-
-            } else if (
-                record.dayType ===
-                "rest"
-            ) {
-
-                restHours +=
-                    result.paidHours;
-
-            } else if (
-                record.dayType ===
-                "holiday"
-            ) {
-
-                holidayHours +=
-                    result.paidHours;
-            }
-
-        }
-    );
-
-
-    let mileageGross = 0;
-
-    let mileageWear = 0;
-
-    let mileageNet = 0;
-
-    let mileageKm = 0;
-
-
-    monthMileageRecords.forEach(
-        record => {
-
-            const result =
-                calculateMileage(
-                    record
-                );
-
-
-            mileageGross +=
-                result.gross;
-
-            mileageWear +=
-                result.wear;
-
-            mileageNet +=
-                result.net;
-
-            mileageKm +=
-                result.km;
-        }
-    );
-
-
-    const extraIncome =
-        totalPay +
-        mileageNet;
-
-
-    const totalIncome =
-        Number(
-            settings.salary || 0
-        ) +
-        extraIncome;
-
-
-    if (
-        $("heroSalary")
-    ) {
-        $("heroSalary").textContent = money(settings.salary);
-    }
-
-
-    if (
-        $("monthOvertimePay")
-    ) {
-
-        $("monthOvertimePay")
-            .textContent =
-            money(totalPay);
-    }
-
-
-    if (
-        $("monthMileageNet")
-    ) {
-
-        $("monthMileageNet")
-            .textContent =
-            money(mileageNet);
-    }
-
-
-    if (
-        $("monthExtraIncome")
-    ) {
-
-        $("monthExtraIncome")
-            .textContent =
-            money(extraIncome);
-    }
-
-
-    if (
-        $("monthTotalIncome")
-    ) {
-
-        $("monthTotalIncome")
-            .textContent =
-            money(totalIncome);
-    }
-
-
-    if (
-        $("monthPaidHours")
-    ) {
-
-        $("monthPaidHours")
-            .textContent =
-            numberText(
-                paidHours,
-                1
-            );
-    }
-
-
-    if (
-        $("monthDays")
-    ) {
-
-        $("monthDays")
-            .textContent =
-            overtimeDays;
-    }
-
-
-    if (
-        $("mileageKm")
-    ) {
-
-        $("mileageKm")
-            .textContent =
-            numberText(
-                mileageKm,
-                1
-            ) +
-            " km";
-    }
-
-
-    if (
-        $("recordCount")
-    ) {
-
-        $("recordCount")
-            .textContent =
-            monthRecords.length;
-    }
-
-
-    if (
-        $("weekdayHours")
-    ) {
-
-        $("weekdayHours")
-            .textContent =
-            numberText(
-                weekdayHours,
-                1
-            ) +
-            " 小時";
-    }
-
-
-    if (
-        $("restHours")
-    ) {
-
-        $("restHours")
-            .textContent =
-            numberText(
-                restHours,
-                1
-            ) +
-            " 小時";
-    }
-
-
-    if (
-        $("holidayHours")
-    ) {
-
-        $("holidayHours")
-            .textContent =
-            numberText(
-                holidayHours,
-                1
-            ) +
-            " 小時";
-    }
-
-
-    if (
-        $("actualHours")
-    ) {
-
-        $("actualHours")
-            .textContent =
-            minutesToHoursText(
-                actualOvertimeMinutes
-            );
-    }
-
-
-    if (
-        $("mileageGross")
-    ) {
-
-        $("mileageGross")
-            .textContent =
-            money(mileageGross);
-    }
-
-
-    if (
-        $("mileageWear")
-    ) {
-
-        $("mileageWear")
-            .textContent =
-            money(mileageWear);
-    }
-
-
-    if (
-        $("mileageNet")
-    ) {
-
-        $("mileageNet")
-            .textContent =
-            money(mileageNet);
-    }
-
-
-    if (
-        $("monthPicker")
-    ) {
-
-        $("monthPicker")
-            .value =
-            selectedMonth;
-    }
-
-
+    renderHero(c);
+    renderBreakdown(c);
+    renderCalendar(c);
+    renderHours(c);
     renderRecords();
-
-    renderMileage();
+    renderLeaves(c);
+    renderMileage(c);
+    updateQuickPreview();
 }
 
+function renderAll() {
+    render();
+    renderLedger();
+}
 
-/* =========================================================
-   RECORD LIST
-========================================================= */
+function renderHero(c) {
+    const el = $("hero");
+    if (!el) return;
 
-function renderRecords() {
+    el.innerHTML = `
+        <div class="hero-kicker">${escapeHTML(formatMonth(selectedMonth))}　預估總收入</div>
+        <div class="hero-total">${signedMoney(c.totalIncome)}</div>
+        <div class="hero-sub">
+            預估薪資入帳 <strong>${signedMoney(c.payNet)}</strong>
+            ・ 計薪 <strong>${numberText(c.paidHours, 1)}</strong> 小時
+            ・ 加班 <strong>${c.overtimeDays}</strong> 天
+            ・ 時薪 <strong>${money(c.hourlyRate)}</strong>
+        </div>
+        <div class="hero-chips">
+            <div class="chip"><span>底薪</span><strong>${money(c.salary)}</strong></div>
+            <div class="chip"><span>加班費</span><strong>${money(c.overtimePay)}</strong></div>
+            <div class="chip"><span>補貼／獎金</span><strong>${money(c.extraIncome)}</strong></div>
+            <div class="chip ${c.totalDeduct > 0 ? "neg" : ""}"><span>請假與扣款</span><strong>${c.totalDeduct > 0 ? "−" : ""}${money(c.totalDeduct)}</strong></div>
+            <div class="chip"><span>里程淨收入</span><strong>${money(c.mileageNet)}</strong></div>
+        </div>
+    `;
+}
 
-    const container = $("records");
-    const emptyState = $("emptyState");
+function lineHTML(label, amount, options = {}) {
+    const cls = ["line"];
+    if (options.neg) cls.push("neg");
+    if (options.cls) cls.push(options.cls);
 
-    if (!container) return;
+    return `
+        <div class="${cls.join(" ")}">
+            <span>${escapeHTML(label)}${options.small ? `<small>${options.small}</small>` : ""}</span>
+            <strong>${options.neg ? "−" : ""}${money(amount)}</strong>
+        </div>
+    `;
+}
 
-    const monthRecords = getMonthRecords()
-        .slice()
-        .sort((a, b) => {
-            const result = String(a.date).localeCompare(String(b.date));
-            return recordSortOrder === "asc" ? result : -result;
-        });
+function renderBreakdown(c) {
+    const el = $("breakdown");
+    if (!el) return;
 
-    container.innerHTML = "";
+    const rows = [];
 
-    if (emptyState) {
-        emptyState.style.display = monthRecords.length ? "none" : "block";
+    rows.push(lineHTML("底薪", c.salary, {
+        small: c.salary !== num(settings.salary) ? "當月月薪（調薪前）" : ""
+    }));
+
+    rows.push(lineHTML("加班費", c.overtimePay, {
+        small: `${numberText(c.paidHours, 1)} 小時・時薪 ${money(c.hourlyRate)}`
+    }));
+
+    if (c.faBonus) rows.push(lineHTML("全勤獎金", c.faBonus));
+
+    settings.fixedItems
+        .filter(item => item.kind === "income")
+        .forEach(item => rows.push(lineHTML(item.name || "固定津貼", item.amount, { small: "每月固定" })));
+
+    c.monthItems
+        .filter(item => item.kind === "income")
+        .forEach(item => rows.push(lineHTML(item.name || "補貼", item.amount, { small: itemLinks(item) })));
+
+    if (c.monthLeaves.length) {
+        rows.push(lineHTML("請假／未上班扣薪", c.leaveDeduct, {
+            neg: c.leaveDeduct > 0,
+            small: `${c.monthLeaves.length} 筆・共 ${hoursText(c.leaveHours)}`
+        }));
     }
 
-    monthRecords.forEach(record => {
-        const result = calculateRecord(record);
-        const card = document.createElement("div");
-        card.className = "record-card record-card-v2";
+    if (c.faDeduct) rows.push(lineHTML("全勤獎金扣除", c.faDeduct, { neg: true }));
 
-        card.innerHTML = `
-            <div class="record-top">
-                <div>
-                    <div class="record-title">${escapeHTML(formatDate(record.date))}</div>
-                    <div class="record-subtitle">
-                        ${escapeHTML(getDayTypeText(record.dayType))}
-                        ・ ${escapeHTML(record.start || "")} → ${escapeHTML(record.end || "")}
-                    </div>
-                </div>
-                <div class="record-pay">${money(result.total)}</div>
-            </div>
+    settings.fixedItems
+        .filter(item => item.kind !== "income")
+        .forEach(item => rows.push(lineHTML(item.name || "固定扣款", item.amount, { neg: true, small: "每月固定" })));
 
-            <div class="record-quick-line">
-                <span>公司計薪 <strong>${numberText(result.paidHours, 1)} 小時</strong></span>
-                <button class="record-detail-toggle" type="button" data-toggle-detail>詳細 ▾</button>
-            </div>
+    c.monthItems
+        .filter(item => item.kind !== "income")
+        .forEach(item => rows.push(lineHTML(item.name || "扣款", item.amount, { neg: true, small: itemLinks(item) })));
 
-            ${record.note ? `<div class="record-note-v2">${escapeHTML(record.note)}</div>` : ""}
+    rows.push(`
+        <div class="line total">
+            <span>預估薪資入帳</span>
+            <strong>${signedMoney(c.payNet)}</strong>
+        </div>
+    `);
 
-            <div class="record-details-v2" hidden>
-                <div class="record-metrics">
-                    <div class="metric"><span>實際工作</span><strong>${minutesToText(result.actualWorkMinutes)}</strong></div>
-                    <div class="metric"><span>實際加班</span><strong>${minutesToText(result.overtimeMinutes)}</strong></div>
-                    <div class="metric"><span>公司計薪</span><strong>${numberText(result.paidHours, 1)} 小時</strong></div>
-                    <div class="metric"><span>1.34 倍</span><strong>${numberText(result.firstTwoHours, 1)}h / ${money(result.payFirst)}</strong></div>
-                    <div class="metric"><span>1.67 倍</span><strong>${numberText(result.thirdToEighth, 1)}h / ${money(result.paySecond)}</strong></div>
-                    <div class="metric"><span>2.67 倍</span><strong>${numberText(result.ninthToTwelfth, 1)}h / ${money(result.payThird)}</strong></div>
-                </div>
-            </div>
+    rows.push(`
+        <div class="line muted-total">
+            <span>＋ 里程淨收入</span>
+            <strong>${money(c.mileageNet)}</strong>
+        </div>
+        <div class="line muted-total">
+            <span>＝ 預估總收入</span>
+            <strong>${signedMoney(c.totalIncome)}</strong>
+        </div>
+    `);
 
-            <div class="record-actions">
-                <button class="secondary" type="button" data-edit-record="${escapeHTML(record.id)}">編輯</button>
-                <button class="danger" type="button" data-delete-record="${escapeHTML(record.id)}">刪除</button>
-            </div>
+    el.innerHTML = rows.join("");
+}
+
+function itemLinks(item) {
+    const id = escapeHTML(item.id);
+    return `本月 ・ <button class="link-btn" type="button" data-action="edit-item" data-id="${id}" style="padding:0 2px">編輯</button><button class="link-btn del" type="button" data-action="delete-item" data-id="${id}" style="padding:0 2px">刪除</button>`;
+}
+
+function renderCalendar(c) {
+    const el = $("calendar");
+    if (!el) return;
+
+    const [year, month] = selectedMonth.split("-").map(Number);
+    const firstWeekday = new Date(year, month - 1, 1).getDay();
+    const dayCount = new Date(year, month, 0).getDate();
+    const today = getTodayString();
+    const cells = [];
+
+    for (let i = 0; i < firstWeekday; i++) {
+        cells.push('<div class="cal-day blank"></div>');
+    }
+
+    for (let day = 1; day <= dayCount; day++) {
+        const date = selectedMonth + "-" + pad2(day);
+        const weekday = new Date(year, month - 1, day).getDay();
+
+        const paid = c.monthRecords
+            .filter(record => record.date === date)
+            .reduce((sum, record) => sum + calculateRecord(record).paidHours, 0);
+
+        const hasRecord = c.monthRecords.some(record => record.date === date);
+        const leave = c.monthLeaves.find(item => item.date === date);
+        const hasMileage = c.monthMileage.some(record => record.date === date);
+
+        const cls = ["cal-day"];
+        if (weekday === 0 || weekday === 6) cls.push("weekend");
+        if (date === today) cls.push("today");
+
+        cells.push(`
+            <button class="${cls.join(" ")}" type="button" data-action="day" data-date="${date}" aria-label="${escapeHTML(formatDate(date))}">
+                <span class="cal-num">${day}</span>
+                ${hasRecord ? `<span class="cal-tag ot">${paid > 0 ? numberText(paid, 1) + "h" : "出勤"}</span>` : ""}
+                ${leave ? `<span class="cal-tag leave">${escapeHTML(getLeaveLabel(leave.type).slice(0, 2))}</span>` : ""}
+                ${hasMileage ? '<span class="cal-dot"></span>' : ""}
+            </button>
+        `);
+    }
+
+    el.innerHTML = cells.join("");
+}
+
+function renderHours(c) {
+    const stats = $("hourStats");
+    const meter = $("otMeter");
+
+    if (stats) {
+        stats.innerHTML = `
+            <div class="stat accent"><span>公司計薪</span><strong>${numberText(c.paidHours, 1)} 小時</strong><small>${c.overtimeDays} 天加班</small></div>
+            <div class="stat"><span>平日加班</span><strong>${numberText(c.weekdayHours, 1)} 小時</strong><small>其中早上 ${numberText(c.earlyPaidHours, 1)} 小時</small></div>
+            <div class="stat"><span>休假日</span><strong>${numberText(c.restHours, 1)} 小時</strong><small>國定假日 ${numberText(c.holidayHours, 1)} 小時</small></div>
+            <div class="stat"><span>實際加班</span><strong>${minutesToHoursText(c.actualOvertimeMinutes)}</strong><small>未滿 30 分鐘不計薪</small></div>
         `;
+    }
 
-        const toggle = card.querySelector("[data-toggle-detail]");
-        const details = card.querySelector(".record-details-v2");
-        toggle?.addEventListener("click", () => {
-            details.hidden = !details.hidden;
-            toggle.textContent = details.hidden ? "詳細 ▾" : "收合 ▴";
-        });
+    if (meter) {
+        const limit = settings.otLimit;
 
-        card.querySelector("[data-edit-record]")?.addEventListener("click", event => {
-            openRecord(event.currentTarget.dataset.editRecord);
-        });
+        if (!limit) {
+            meter.innerHTML = "";
+            return;
+        }
 
-        card.querySelector("[data-delete-record]")?.addEventListener("click", event => {
-            deleteRecord(event.currentTarget.dataset.deleteRecord);
-        });
+        const ratio = c.paidHours / limit;
+        const state = ratio > 1 ? "over" : ratio >= 0.85 ? "warn" : "";
 
-        container.appendChild(card);
+        meter.innerHTML = `
+            <div class="meter-head">
+                <span>本月加班上限提醒（${limit} 小時）</span>
+                <span><strong>${numberText(c.paidHours, 1)}</strong> / ${limit}${ratio > 1 ? "　已超過" : ""}</span>
+            </div>
+            <div class="meter-bar"><i class="${state}" style="width:${Math.min(100, ratio * 100).toFixed(1)}%"></i></div>
+        `;
+    }
+}
+
+function recordItemHTML(record) {
+    const r = calculateRecord(record);
+    const id = escapeHTML(record.id);
+
+    return `
+        <div class="item">
+            <div class="item-top">
+                <div>
+                    <div class="item-title">${escapeHTML(formatDate(record.date))}</div>
+                    <div class="item-sub">${escapeHTML(getDayTypeText(record.dayType))} ・ ${escapeHTML(record.start || "")} → ${escapeHTML(record.end || "")}${record.note ? "<br>" + escapeHTML(record.note) : ""}</div>
+                </div>
+                <div class="item-amt">${money(r.total)}</div>
+            </div>
+            <div class="detail" hidden>
+                <div>實際工作<b>${minutesToText(r.actualWorkMinutes)}</b></div>
+                <div>實際加班<b>${minutesToText(r.overtimeMinutes)}</b></div>
+                <div>時薪<b>${money(r.hourlyRate)}</b></div>
+                <div>1.34 倍<b>${numberText(r.firstTwoHours, 1)}h / ${money(r.payFirst)}</b></div>
+                <div>1.67 倍<b>${numberText(r.thirdToEighth, 1)}h / ${money(r.paySecond)}</b></div>
+                <div>2.67 倍<b>${numberText(r.ninthToTwelfth, 1)}h / ${money(r.payThird)}</b></div>
+            </div>
+            <div class="item-foot">
+                <div class="tags">
+                    <span class="tag gold">計薪 ${numberText(r.paidHours, 1)} 小時</span>
+                    ${r.earlyPaidHours > 0 ? `<span class="tag green">早上 ${numberText(r.earlyPaidHours, 1)} 小時</span>` : ""}
+                </div>
+                <div class="item-btns">
+                    <button class="link-btn" type="button" data-action="toggle-detail">詳細</button>
+                    <button class="link-btn" type="button" data-action="edit-record" data-id="${id}">編輯</button>
+                    <button class="link-btn del" type="button" data-action="delete-record" data-id="${id}">刪除</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function leaveItemHTML(leave) {
+    const r = calculateLeave(leave);
+    const id = escapeHTML(leave.id);
+
+    return `
+        <div class="item">
+            <div class="item-top">
+                <div>
+                    <div class="item-title">${escapeHTML(formatDate(leave.date))}</div>
+                    <div class="item-sub">${escapeHTML(getLeaveLabel(leave.type))} ・ ${hoursText(r.hours)} ・ 扣薪 ${r.pct}%${leave.note ? "<br>" + escapeHTML(leave.note) : ""}</div>
+                </div>
+                <div class="item-amt ${r.deduction > 0 ? "neg" : ""}">${r.deduction > 0 ? "−" + money(r.deduction) : "不扣薪"}</div>
+            </div>
+            <div class="item-foot">
+                <div class="tags">
+                    <span class="tag blue">${escapeHTML(getLeaveLabel(leave.type))}</span>
+                    ${leave.breakFA ? '<span class="tag red">扣全勤</span>' : ""}
+                </div>
+                <div class="item-btns">
+                    <button class="link-btn" type="button" data-action="edit-leave" data-id="${id}">編輯</button>
+                    <button class="link-btn del" type="button" data-action="delete-leave" data-id="${id}">刪除</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function mileageItemHTML(record) {
+    const r = calculateMileage(record);
+    const id = escapeHTML(record.id);
+    const wearText = r.wearRate > 0
+        ? `損耗 ${numberText(r.km, 1)} km × ${r.wearRate}`
+        : `固定損耗 ${money(r.fixedWear)}`;
+
+    return `
+        <div class="item">
+            <div class="item-top">
+                <div>
+                    <div class="item-title">${escapeHTML(formatDate(record.date))}</div>
+                    <div class="item-sub">${numberText(r.km, 1)} km × ${money(r.rate)} ＝ 補助 ${money(r.gross)} ・ ${wearText}（−${money(r.wear)}）${record.note ? "<br>" + escapeHTML(record.note) : ""}</div>
+                </div>
+                <div class="item-amt">${money(r.net)}</div>
+            </div>
+            <div class="item-foot">
+                <div class="tags"><span class="tag green">里程</span></div>
+                <div class="item-btns">
+                    <button class="link-btn" type="button" data-action="edit-mileage" data-id="${id}">編輯</button>
+                    <button class="link-btn del" type="button" data-action="delete-mileage" data-id="${id}">刪除</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function sortByDate(list, order) {
+    return list.slice().sort((a, b) => {
+        const result = String(a.date).localeCompare(String(b.date));
+        return order === "asc" ? result : -result;
     });
 }
 
+function renderRecords() {
+    const el = $("records");
+    if (!el) return;
 
-/* =========================================================
-   MILEAGE LIST
-========================================================= */
+    const list = sortByDate(getMonthRecords(), recordSortOrder);
 
-function renderMileage() {
+    el.innerHTML = list.length
+        ? list.map(recordItemHTML).join("")
+        : '<div class="empty">本月尚無出勤紀錄</div>';
+}
 
-    const container =
-        $("mileageRecords");
+function renderLeaves(c) {
+    const el = $("leaves");
+    if (!el) return;
 
-    const emptyState =
-        $("emptyMileageState");
+    const list = sortByDate(c.monthLeaves, recordSortOrder);
 
+    el.innerHTML = list.length
+        ? list.map(leaveItemHTML).join("")
+        : '<div class="empty">本月沒有請假或未上班紀錄</div>';
+}
 
-    if (!container) {
-        return;
+function renderMileage(c) {
+    const el = $("mileageRecords");
+    if (!el) return;
+
+    const list = sortByDate(c.monthMileage, recordSortOrder);
+
+    if ($("mileageSummary")) {
+        $("mileageSummary").textContent =
+            `${numberText(c.mileageKm, 1)} km ・ 補助 ${money(c.mileageGross)} − 損耗 ${money(c.mileageWear)} ＝ 淨收入 ${money(c.mileageNet)}`;
     }
 
-
-    const monthRecords =
-        getMonthMileageRecords();
-
-
-    container.innerHTML =
-        "";
-
-
-    if (
-        emptyState
-    ) {
-
-        emptyState.style.display =
-            monthRecords.length
-                ? "none"
-                : "block";
-    }
-
-
-    monthRecords.forEach(
-        record => {
-
-            const result =
-                calculateMileage(
-                    record
-                );
-
-
-            const wearText =
-                result.wearRate > 0
-                    ? (
-                        result.km +
-                        " km × " +
-                        result.wearRate +
-                        " / km"
-                    )
-                    : (
-                        "固定損耗 " +
-                        money(
-                            result.fixedWear
-                        )
-                    );
-
-
-            const card =
-                document.createElement(
-                    "div"
-                );
-
-
-            card.className =
-                "mileage-card";
-
-
-            card.innerHTML = `
-
-                <div class="mileage-top">
-
-                    <div>
-
-                        <div class="mileage-title">
-
-                            ${escapeHTML(
-                                formatDate(
-                                    record.date
-                                )
-                            )}
-
-                        </div>
-
-
-                        <div class="mileage-detail">
-
-                            ${numberText(
-                                result.km,
-                                1
-                            )}
-
-                            km
-
-                            ×
-
-                            ${money(
-                                result.rate
-                            )}
-
-                            / km
-
-                        </div>
-
-                    </div>
-
-
-                    <div class="mileage-net">
-
-                        ${money(
-                            result.net
-                        )}
-
-                    </div>
-
-                </div>
-
-
-                <div class="mileage-detail">
-
-                    補助：
-                    ${money(
-                        result.gross
-                    )}
-
-                    <br>
-
-                    損耗：
-                    ${money(
-                        result.wear
-                    )}
-
-                    <br>
-
-                    損耗方式：
-                    ${escapeHTML(
-                        wearText
-                    )}
-
-                    <br>
-
-                    實際收入：
-                    ${money(
-                        result.net
-                    )}
-
-                    ${
-                        record.note
-                            ? `
-                                <br>
-                                備註：
-                                ${escapeHTML(
-                                    record.note
-                                )}
-                            `
-                            : ""
-                    }
-
-                </div>
-
-
-                <div class="record-actions">
-
-                    <button
-                        class="secondary"
-                        type="button"
-                        data-edit-mileage="${escapeHTML(
-                            record.id
-                        )}"
-                    >
-                        編輯
-                    </button>
-
-
-                    <button
-                        class="danger"
-                        type="button"
-                        data-delete-mileage="${escapeHTML(
-                            record.id
-                        )}"
-                    >
-                        刪除
-                    </button>
-
-                </div>
-            `;
-
-
-            container.appendChild(
-                card
-            );
-
-        }
-    );
-
-
-    container
-        .querySelectorAll(
-            "[data-edit-mileage]"
-        )
-        .forEach(button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    openMileage(
-                        button.dataset
-                            .editMileage
-                    );
-
-                }
-            );
-
-        });
-
-
-    container
-        .querySelectorAll(
-            "[data-delete-mileage]"
-        )
-        .forEach(button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    deleteMileage(
-                        button.dataset
-                            .deleteMileage
-                    );
-
-                }
-            );
-
-        });
+    el.innerHTML = list.length
+        ? list.map(mileageItemHTML).join("")
+        : '<div class="empty">本月尚無里程紀錄</div>';
 }
 
 
 /* =========================================================
-   QUICK RECORD
+   快速記今天
 ========================================================= */
 
-function updateQuickRecordPreview() {
-    const preview = $("quickRecordPreview");
-    const end = $("quickEnd")?.value || "";
+function isWeekendDate(dateString) {
+    const day = new Date(dateString + "T00:00:00").getDay();
+    return day === 0 || day === 6;
+}
+
+function updateQuickPreview() {
+    const preview = $("quickPreview");
     if (!preview) return;
 
-    const todayDate = new Date(getTodayString() + "T00:00:00");
-    const isWeekend = todayDate.getDay() === 0 || todayDate.getDay() === 6;
+    const start = $("quickStart")?.value || settings.normalStart;
+    const end = $("quickEnd")?.value || "";
 
-    if (isWeekend) {
-        preview.innerHTML = "今天是週末，請使用 <strong>詳細設定</strong>，避免休息時間與實際開工時間計算錯誤。";
+    if (isWeekendDate(getTodayString())) {
+        preview.innerHTML = "今天是週末，請按「＋ 出勤」填寫實際工作與休息時間，才不會算錯。";
         return;
     }
 
@@ -1535,25 +1190,29 @@ function updateQuickRecordPreview() {
         return;
     }
 
-    const result = calculateRecord({
+    const r = calculateRecord({
         date: getTodayString(),
         dayType: "weekday",
-        start: settings.normalStart,
+        start,
         end,
         breakMinutes: 0
     });
 
-    preview.innerHTML = `公司計薪 <strong>${numberText(result.paidHours, 1)} 小時</strong> ・ 預估 <strong>${money(result.total)}</strong>`;
+    preview.innerHTML =
+        `公司計薪 <strong>${numberText(r.paidHours, 1)} 小時</strong>` +
+        (r.earlyPaidHours > 0 ? `（早上 ${numberText(r.earlyPaidHours, 1)} 小時）` : "") +
+        ` ・ 預估 <strong>${money(r.total)}</strong>`;
 }
 
 function saveQuickRecord() {
+    const today = getTodayString();
+    const start = $("quickStart")?.value || settings.normalStart;
     const end = $("quickEnd")?.value || "";
-    const todayDate = new Date(getTodayString() + "T00:00:00");
-    const isWeekend = todayDate.getDay() === 0 || todayDate.getDay() === 6;
 
-    if (isWeekend) {
-        alert("今天是週末，請使用「詳細設定」輸入實際工作時間與休息時間。");
-        openQuickDetail();
+    if (isWeekendDate(today)) {
+        openRecord(null, today);
+        if (end) $("end").value = end;
+        updateRecordPreview();
         return;
     }
 
@@ -1562,19 +1221,18 @@ function saveQuickRecord() {
         return;
     }
 
-    const today = getTodayString();
     const existing = records.find(record => record.date === today && record.dayType === "weekday");
 
     if (existing) {
-        const confirmed = confirm("今天已經有平日出勤紀錄，要用新的下班時間更新這一筆嗎？");
-        if (!confirmed) return;
+        if (!confirm("今天已經有平日出勤紀錄，要用新的時間更新這一筆嗎？")) return;
+        existing.start = start;
         existing.end = end;
     } else {
         records.push({
-            id: Date.now().toString() + Math.random().toString(36).slice(2),
+            id: uid(),
             date: today,
             dayType: "weekday",
-            start: settings.normalStart,
+            start,
             end,
             breakMinutes: 0,
             note: ""
@@ -1585,1277 +1243,1272 @@ function saveQuickRecord() {
     saveData();
     render();
     $("quickEnd").value = "";
-    updateQuickRecordPreview();
-}
-
-function openQuickDetail() {
-    openRecord();
-    const quickEnd = $("quickEnd")?.value;
-    if (quickEnd) {
-        $("end").value = quickEnd;
-        updateRecordPreview();
-    }
-}
-
-function goCurrentMonth() {
-    selectedMonth = getCurrentMonth();
-    if ($("monthPicker")) $("monthPicker").value = selectedMonth;
-    render();
-}
-
-function changeRecordSort(value) {
-    recordSortOrder = value === "asc" ? "asc" : "desc";
-    localStorage.setItem(RECORD_SORT_KEY, recordSortOrder);
-    renderRecords();
+    updateQuickPreview();
+    toast("已儲存今天的出勤");
 }
 
 
 /* =========================================================
-   RECORD MODAL
+   彈出視窗共用
 ========================================================= */
 
-function openRecord(
-    id = null
-) {
+function openModal(id) {
+    document.querySelectorAll(".modal.show").forEach(modal => modal.classList.remove("show"));
+    $(id)?.classList.add("show");
+}
 
-    const modal =
-        $("recordModal");
+function closeModals() {
+    document.querySelectorAll(".modal.show").forEach(modal => modal.classList.remove("show"));
+}
 
+let toastTimer = null;
 
-    if (!modal) {
-        return;
-    }
+function toast(message) {
+    const el = $("toast");
+    if (!el) return;
 
+    el.textContent = message;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
+}
 
-    const form =
-        $("recordForm");
-
-
-    if (form) {
-        form.reset();
-    }
-
-
-    $("recordId").value =
-        "";
-
-
-    if (id) {
-
-        const record =
-            records.find(
-                item =>
-                    String(item.id) ===
-                    String(id)
-            );
+function defaultDate() {
+    return selectedMonth === getCurrentMonth() ? getTodayString() : selectedMonth + "-01";
+}
 
 
-        if (!record) {
-            return;
-        }
+/* =========================================================
+   出勤
+========================================================= */
 
+function applyDayTypeDefault() {
+    // 新增時依日期自動帶入：週末預設休假日並扣 60 分鐘休息。
+    if ($("recordId").value || !$("date").value) return;
 
-        $("recordModalTitle")
-            .textContent =
-            "編輯出勤";
+    const weekend = isWeekendDate($("date").value);
+    $("dayType").value = weekend ? "rest" : "weekday";
+    $("breakMinutes").value = weekend ? 60 : 0;
+}
 
+function openRecord(id = null, date = null) {
+    $("recordForm").reset();
+    $("recordId").value = "";
 
-        $("recordId").value =
-            record.id;
+    const record = id ? records.find(item => String(item.id) === String(id)) : null;
 
+    if (id && !record) return;
 
-        $("date").value =
-            record.date || "";
-
-
-        $("dayType").value =
-            record.dayType ||
-            "weekday";
-
-
-        $("start").value =
-            record.start ||
-            settings.normalStart;
-
-
-        $("end").value =
-            record.end ||
-            settings.normalEnd;
-
-
-        $("breakMinutes").value =
-            record.breakMinutes ??
-            0;
-
-
-        $("note").value =
-            record.note || "";
-
+    if (record) {
+        $("recordModalTitle").textContent = "編輯出勤";
+        $("recordId").value = record.id;
+        $("date").value = record.date || "";
+        $("dayType").value = record.dayType || "weekday";
+        $("start").value = record.start || settings.normalStart;
+        $("end").value = record.end || settings.normalEnd;
+        $("breakMinutes").value = record.breakMinutes ?? 0;
+        $("note").value = record.note || "";
     } else {
-
-        $("recordModalTitle")
-            .textContent =
-            "新增出勤";
-
-
-        $("recordId").value =
-            "";
-
-
-        $("date").value =
-            selectedMonth ===
-            getCurrentMonth()
-                ? getTodayString()
-                : selectedMonth +
-                  "-01";
-
-
-        $("dayType").value =
-            "weekday";
-
-
-        $("start").value =
-            settings.normalStart;
-
-
-        $("end").value =
-            settings.normalEnd;
-
-
-        $("breakMinutes").value =
-            0;
-
-
-        $("note").value =
-            "";
+        $("recordModalTitle").textContent = "新增出勤";
+        $("date").value = date || defaultDate();
+        $("start").value = settings.normalStart;
+        $("end").value = settings.normalEnd;
+        applyDayTypeDefault();
     }
-
 
     updateRecordPreview();
-
-    modal.classList.add(
-        "show"
-    );
+    openModal("recordModal");
 }
-
-
-function closeRecordModal() {
-
-    const modal =
-        $("recordModal");
-
-    if (modal) {
-
-        modal.classList.remove(
-            "show"
-        );
-    }
-}
-
 
 function updateRecordPreview() {
-
-    const preview =
-        $("preview");
-
-
-    if (!preview) {
-        return;
-    }
-
+    const preview = $("preview");
+    if (!preview) return;
 
     const record = {
-
-        date:
-            $("date")?.value ||
-            "",
-
-        dayType:
-            $("dayType")?.value ||
-            "weekday",
-
-        start:
-            $("start")?.value ||
-            "",
-
-        end:
-            $("end")?.value ||
-            "",
-
-        breakMinutes:
-            Number(
-                $("breakMinutes")
-                    ?.value || 0
-            )
+        date: $("date").value,
+        dayType: $("dayType").value || "weekday",
+        start: $("start").value,
+        end: $("end").value,
+        breakMinutes: num($("breakMinutes").value)
     };
 
-
-    if (
-        !record.start ||
-        !record.end
-    ) {
-
-        preview.innerHTML =
-            "請輸入上下班時間。";
-
+    if (!record.start || !record.end) {
+        preview.innerHTML = "請輸入上下班時間。";
         return;
     }
 
-
-    const result =
-        calculateRecord(
-            record
-        );
-
+    const r = calculateRecord(record);
 
     preview.innerHTML = `
-
-        實際工作：
-
-        <strong>
-            ${minutesToText(
-                result.actualWorkMinutes
-            )}
-        </strong>
-
-        <br>
-
-        實際加班：
-
-        <strong>
-            ${minutesToText(
-                result.overtimeMinutes
-            )}
-        </strong>
-
-        <br>
-
-        公司計薪：
-
-        <strong>
-            ${numberText(
-                result.paidHours,
-                1
-            )} 小時
-        </strong>
-
-        <br>
-
-        預估加班費：
-
-        <strong>
-            ${money(
-                result.total
-            )}
-        </strong>
+        實際工作 <strong>${minutesToText(r.actualWorkMinutes)}</strong>
+        ・ 實際加班 <strong>${minutesToText(r.overtimeMinutes)}</strong><br>
+        公司計薪 <strong>${numberText(r.paidHours, 1)} 小時</strong>
+        ${r.earlyPaidHours > 0 ? `（含早上 ${numberText(r.earlyPaidHours, 1)} 小時）` : ""}
+        ・ 預估加班費 <strong>${money(r.total)}</strong>
     `;
 }
 
-
-function saveRecord(
-    event
-) {
-
+function saveRecord(event) {
     event.preventDefault();
 
-
-    const id =
-        $("recordId")
-            .value
-            .trim();
-
-
-    const date =
-        $("date").value;
-
-
-    const dayType =
-        $("dayType").value;
-
-
-    const start =
-        $("start").value;
-
-
-    const end =
-        $("end").value;
-
-
-    const breakMinutes =
-        Math.max(
-            0,
-            Number(
-                $("breakMinutes")
-                    .value || 0
-            )
-        );
-
-
-    const note =
-        $("note")
-            .value
-            .trim();
-
-
-    if (
-        !date ||
-        !start ||
-        !end
-    ) {
-
-        alert(
-            "請填寫日期、開始時間與結束時間。"
-        );
-
-        return;
-    }
-
+    const id = $("recordId").value.trim();
 
     const data = {
-
-        id:
-            id ||
-            (
-                Date.now()
-                    .toString() +
-                Math.random()
-                    .toString(36)
-                    .slice(2)
-            ),
-
-        date,
-
-        dayType,
-
-        start,
-
-        end,
-
-        breakMinutes,
-
-        note
+        id: id || uid(),
+        date: $("date").value,
+        dayType: $("dayType").value,
+        start: $("start").value,
+        end: $("end").value,
+        breakMinutes: Math.max(0, num($("breakMinutes").value)),
+        note: $("note").value.trim()
     };
 
-
-    if (id) {
-
-        const index =
-            records.findIndex(
-                record =>
-                    String(record.id) ===
-                    String(id)
-            );
-
-
-        if (
-            index !== -1
-        ) {
-
-            records[index] = {
-
-                ...records[index],
-
-                ...data
-            };
-        }
-
-    } else {
-
-        records.push(
-            data
-        );
+    if (!data.date || !data.start || !data.end) {
+        alert("請填寫日期、上班時間與下班時間。");
+        return;
     }
 
+    const index = records.findIndex(record => String(record.id) === String(id));
 
+    if (id && index !== -1) records[index] = { ...records[index], ...data };
+    else records.push(data);
+
+    selectedMonth = getMonthFromDate(data.date) || selectedMonth;
     saveData();
+    closeModals();
+    render();
+    toast("出勤已儲存");
+}
 
-    closeRecordModal();
+function deleteRecord(id) {
+    if (!confirm("確定要刪除這筆出勤紀錄嗎？")) return;
 
+    records = records.filter(item => String(item.id) !== String(id));
+    saveData();
+    closeModals();
     render();
 }
 
 
 /* =========================================================
-   DELETE RECORD
+   請假／未上班
 ========================================================= */
 
-function deleteRecord(
-    id
-) {
+function fillLeaveTypes() {
+    const select = $("leaveType");
+    if (!select || select.options.length) return;
 
-    const record =
-        records.find(
-            item =>
-                String(item.id) ===
-                String(id)
+    select.innerHTML = Object.entries(LEAVE_TYPES)
+        .map(([key, type]) => `<option value="${key}">${escapeHTML(type.label)}</option>`)
+        .join("");
+}
+
+function applyLeaveTypeDefault() {
+    const type = LEAVE_TYPES[$("leaveType").value] || LEAVE_TYPES.other;
+    $("leavePct").value = type.pct;
+    $("leaveBreakFA").checked = type.breakFA;
+    updateLeavePreview();
+}
+
+function openLeave(id = null, date = null) {
+    fillLeaveTypes();
+    $("leaveForm").reset();
+    $("leaveId").value = "";
+
+    const leave = id ? settings.leaves.find(item => String(item.id) === String(id)) : null;
+
+    if (id && !leave) return;
+
+    if (leave) {
+        $("leaveModalTitle").textContent = "編輯請假／未上班";
+        $("leaveId").value = leave.id;
+        $("leaveDate").value = leave.date || "";
+        $("leaveType").value = LEAVE_TYPES[leave.type] ? leave.type : "other";
+        $("leaveHours").value = leave.hours ?? 8;
+        $("leavePct").value = leave.pct ?? 100;
+        $("leaveBreakFA").checked = Boolean(leave.breakFA);
+        $("leaveNote").value = leave.note || "";
+    } else {
+        $("leaveModalTitle").textContent = "請假／未上班";
+        $("leaveDate").value = date || defaultDate();
+        $("leaveType").value = "typhoon";
+        $("leaveHours").value = 8;
+        applyLeaveTypeDefault();
+    }
+
+    updateLeavePreview();
+    openModal("leaveModal");
+}
+
+function updateLeavePreview() {
+    const preview = $("leavePreview");
+    if (!preview) return;
+
+    const date = $("leaveDate").value;
+    const r = calculateLeave({
+        date,
+        hours: $("leaveHours").value,
+        pct: $("leavePct").value
+    });
+
+    const lines = [];
+
+    lines.push(
+        r.deduction > 0
+            ? `扣薪 <strong class="bad">−${money(r.deduction)}</strong>（時薪 ${money(r.hourlyRate)} × ${hoursText(r.hours)} × ${r.pct}%）`
+            : "這筆不扣薪，只留下紀錄。"
+    );
+
+    if ($("leaveBreakFA").checked) {
+        lines.push(
+            settings.fullAttendance > 0
+                ? `當月沒有全勤，全勤獎金 <strong class="bad">${money(settings.fullAttendance)}</strong> 不發。`
+                : "已勾選扣全勤；目前設定的全勤獎金是 0，可到「設定」填入金額。"
         );
+    }
 
+    preview.innerHTML = lines.join("<br>");
+}
 
-    if (!record) {
+function saveLeave(event) {
+    event.preventDefault();
+
+    const id = $("leaveId").value.trim();
+
+    const data = {
+        id: id || uid(),
+        date: $("leaveDate").value,
+        type: $("leaveType").value,
+        hours: Math.max(0, num($("leaveHours").value)),
+        pct: Math.min(100, Math.max(0, num($("leavePct").value))),
+        breakFA: $("leaveBreakFA").checked,
+        note: $("leaveNote").value.trim()
+    };
+
+    if (!data.date) {
+        alert("請填寫日期。");
         return;
     }
 
+    const index = settings.leaves.findIndex(item => String(item.id) === String(id));
 
-    const confirmed =
-        confirm(
-            "確定要刪除這筆出勤紀錄嗎？"
-        );
+    if (id && index !== -1) settings.leaves[index] = data;
+    else settings.leaves.push(data);
 
-
-    if (!confirmed) {
-        return;
-    }
-
-
-    records =
-        records.filter(
-            item =>
-                String(item.id) !==
-                String(id)
-        );
-
-
+    selectedMonth = getMonthFromDate(data.date) || selectedMonth;
     saveData();
+    closeModals();
+    render();
+    toast("已儲存");
+}
 
+function deleteLeave(id) {
+    if (!confirm("確定要刪除這筆請假／未上班紀錄嗎？")) return;
+
+    settings.leaves = settings.leaves.filter(item => String(item.id) !== String(id));
+    saveData();
+    closeModals();
     render();
 }
 
 
 /* =========================================================
-   MILEAGE MODAL
+   里程
 ========================================================= */
 
-function openMileage(
-    id = null
-) {
+function openMileage(id = null, date = null) {
+    $("mileageForm").reset();
+    $("mileageId").value = "";
 
-    const modal =
-        $("mileageModal");
+    const record = id ? mileageRecords.find(item => String(item.id) === String(id)) : null;
 
+    if (id && !record) return;
 
-    if (!modal) {
-        return;
-    }
-
-
-    const form =
-        $("mileageForm");
-
-
-    if (form) {
-        form.reset();
-    }
-
-
-    $("mileageId").value =
-        "";
-
-
-    if (id) {
-
-        const record =
-            mileageRecords.find(
-                item =>
-                    String(item.id) ===
-                    String(id)
-            );
-
-
-        if (!record) {
-            return;
-        }
-
-
-        $("mileageModalTitle")
-            .textContent =
-            "編輯里程";
-
-
-        $("mileageId").value =
-            record.id;
-
-
-        $("mileageDate").value =
-            record.date || "";
-
-
-        $("mileageKmInput").value =
-            record.km ?? 0;
-
-
-        $("mileageRate").value =
-            record.rate ?? 6;
-
-
-        $("mileageWearRate").value =
-            record.wearRate
-                ? record.wearRate
-                : "";
-
-
-        $("mileageWearInput").value =
-            record.wear ?? 0;
-
-
-        $("mileageNote").value =
-            record.note || "";
-
+    if (record) {
+        $("mileageModalTitle").textContent = "編輯里程";
+        $("mileageId").value = record.id;
+        $("mileageDate").value = record.date || "";
+        $("mileageKmInput").value = record.km ?? "";
+        $("mileageRate").value = record.rate ?? 6;
+        $("mileageWearRate").value = num(record.wearRate) > 0 ? record.wearRate : "";
+        $("mileageWearInput").value = record.wear ?? 0;
+        $("mileageNote").value = record.note || "";
     } else {
+        // 新增時沿用上一筆的補助與損耗設定。
+        const last = sortByDate(mileageRecords, "desc")[0];
 
-        $("mileageModalTitle")
-            .textContent =
-            "新增里程";
-
-
-        $("mileageId").value =
-            "";
-
-
-        $("mileageDate").value =
-            selectedMonth ===
-            getCurrentMonth()
-                ? getTodayString()
-                : selectedMonth +
-                  "-01";
-
-
-        $("mileageKmInput").value =
-            "";
-
-
-        $("mileageRate").value =
-            6;
-
-
-        $("mileageWearRate").value =
-            "";
-
-
-        $("mileageWearInput").value =
-            0;
-
-
-        $("mileageNote").value =
-            "";
+        $("mileageModalTitle").textContent = "新增里程";
+        $("mileageDate").value = date || defaultDate();
+        $("mileageRate").value = last?.rate ?? 6;
+        $("mileageWearRate").value = num(last?.wearRate) > 0 ? last.wearRate : "";
+        $("mileageWearInput").value = 0;
     }
-
 
     updateMileagePreview();
-
-    modal.classList.add(
-        "show"
-    );
+    openModal("mileageModal");
 }
 
-
-function closeMileageModal() {
-
-    const modal =
-        $("mileageModal");
-
-
-    if (modal) {
-
-        modal.classList.remove(
-            "show"
-        );
-    }
+function readMileageForm() {
+    return {
+        date: $("mileageDate").value,
+        km: Math.max(0, num($("mileageKmInput").value)),
+        rate: Math.max(0, num($("mileageRate").value)),
+        wearRate: Math.max(0, num($("mileageWearRate").value)),
+        wear: Math.max(0, num($("mileageWearInput").value)),
+        note: $("mileageNote").value.trim()
+    };
 }
-
 
 function updateMileagePreview() {
+    const preview = $("mileagePreview");
+    if (!preview) return;
 
-    const preview =
-        $("mileagePreview");
-
-
-    if (!preview) {
-        return;
-    }
-
-
-    const km =
-        Number(
-            $("mileageKmInput")
-                ?.value || 0
-        );
-
-
-    const rate =
-        Number(
-            $("mileageRate")
-                ?.value || 0
-        );
-
-
-    const wearRate =
-        Number(
-            $("mileageWearRate")
-                ?.value || 0
-        );
-
-
-    const wear =
-        Number(
-            $("mileageWearInput")
-                ?.value || 0
-        );
-
-
-    const result =
-        calculateMileage({
-
-            km,
-
-            rate,
-
-            wearRate,
-
-            wear
-        });
-
-
-    const wearText =
-        wearRate > 0
-            ? (
-                km +
-                " km × " +
-                wearRate +
-                " / km"
-            )
-            : (
-                "固定損耗 " +
-                money(wear)
-            );
-
+    const r = calculateMileage(readMileageForm());
 
     preview.innerHTML = `
-
-        補助：
-
-        <strong>
-            ${money(
-                result.gross
-            )}
-        </strong>
-
-        <br>
-
-        損耗：
-
-        <strong>
-            ${money(
-                result.wear
-            )}
-        </strong>
-
-        <br>
-
-        損耗方式：
-
-        ${escapeHTML(
-            wearText
-        )}
-
-        <br>
-
-        實際收入：
-
-        <strong>
-            ${money(
-                result.net
-            )}
-        </strong>
+        補助 <strong>${money(r.gross)}</strong>
+        − 損耗 <strong>${money(r.wear)}</strong>
+        ＝ 實際收入 <strong>${money(r.net)}</strong>
     `;
 }
 
-
-function saveMileage(
-    event
-) {
-
+function saveMileage(event) {
     event.preventDefault();
 
+    const id = $("mileageId").value.trim();
+    const data = { id: id || uid(), ...readMileageForm() };
 
-    const id =
-        $("mileageId")
-            .value
-            .trim();
-
-
-    const date =
-        $("mileageDate")
-            .value;
-
-
-    const km =
-        Math.max(
-            0,
-            Number(
-                $("mileageKmInput")
-                    .value || 0
-            )
-        );
-
-
-    const rate =
-        Math.max(
-            0,
-            Number(
-                $("mileageRate")
-                    .value || 0
-            )
-        );
-
-
-    const wearRate =
-        Math.max(
-            0,
-            Number(
-                $("mileageWearRate")
-                    .value || 0
-            )
-        );
-
-
-    const wear =
-        Math.max(
-            0,
-            Number(
-                $("mileageWearInput")
-                    .value || 0
-            )
-        );
-
-
-    const note =
-        $("mileageNote")
-            .value
-            .trim();
-
-
-    if (!date) {
-
-        alert(
-            "請選擇日期。"
-        );
-
+    if (!data.date || data.km <= 0) {
+        alert("請填寫日期與公里數。");
         return;
     }
 
+    const index = mileageRecords.findIndex(item => String(item.id) === String(id));
+
+    if (id && index !== -1) mileageRecords[index] = { ...mileageRecords[index], ...data };
+    else mileageRecords.push(data);
+
+    selectedMonth = getMonthFromDate(data.date) || selectedMonth;
+    saveData();
+    closeModals();
+    render();
+    toast("里程已儲存");
+}
+
+function deleteMileage(id) {
+    if (!confirm("確定要刪除這筆里程紀錄嗎？")) return;
+
+    mileageRecords = mileageRecords.filter(item => String(item.id) !== String(id));
+    saveData();
+    closeModals();
+    render();
+}
+
+
+/* =========================================================
+   單月補貼／扣款
+========================================================= */
+
+function openItem(id = null) {
+    $("itemForm").reset();
+    $("itemId").value = "";
+
+    const item = id ? settings.monthItems.find(row => String(row.id) === String(id)) : null;
+
+    if (id && !item) return;
+
+    if (item) {
+        $("itemId").value = item.id;
+        $("itemKind").value = item.kind === "income" ? "income" : "deduct";
+        $("itemMonth").value = item.month;
+        $("itemName").value = item.name || "";
+        $("itemAmount").value = item.amount ?? "";
+    } else {
+        $("itemKind").value = "income";
+        $("itemMonth").value = selectedMonth;
+    }
+
+    openModal("itemModal");
+}
+
+function saveItem(event) {
+    event.preventDefault();
+
+    const id = $("itemId").value.trim();
 
     const data = {
-
-        id:
-            id ||
-            (
-                Date.now()
-                    .toString() +
-                Math.random()
-                    .toString(36)
-                    .slice(2)
-            ),
-
-        date,
-
-        km,
-
-        rate,
-
-        wearRate,
-
-        wear,
-
-        note
+        id: id || uid(),
+        kind: $("itemKind").value === "income" ? "income" : "deduct",
+        month: $("itemMonth").value,
+        name: $("itemName").value.trim(),
+        amount: Math.max(0, num($("itemAmount").value))
     };
 
-
-    if (id) {
-
-        const index =
-            mileageRecords.findIndex(
-                record =>
-                    String(record.id) ===
-                    String(id)
-            );
-
-
-        if (
-            index !== -1
-        ) {
-
-            mileageRecords[index] = {
-
-                ...mileageRecords[index],
-
-                ...data
-            };
-        }
-
-    } else {
-
-        mileageRecords.push(
-            data
-        );
+    if (!data.month || !data.name) {
+        alert("請填寫月份與名稱。");
+        return;
     }
 
+    const index = settings.monthItems.findIndex(row => String(row.id) === String(id));
 
+    if (id && index !== -1) settings.monthItems[index] = data;
+    else settings.monthItems.push(data);
+
+    selectedMonth = data.month;
     saveData();
+    closeModals();
+    render();
+    toast("已儲存");
+}
 
-    closeMileageModal();
+function deleteItem(id) {
+    if (!confirm("確定要刪除這個項目嗎？")) return;
 
+    settings.monthItems = settings.monthItems.filter(row => String(row.id) !== String(id));
+    saveData();
     render();
 }
 
 
 /* =========================================================
-   DELETE MILEAGE
+   單日檢視
 ========================================================= */
 
-function deleteMileage(
-    id
-) {
+function openDay(date) {
+    const dayRecords = records.filter(item => item.date === date);
+    const dayLeaves = settings.leaves.filter(item => item.date === date);
+    const dayMileage = mileageRecords.filter(item => item.date === date);
 
-    const record =
-        mileageRecords.find(
-            item =>
-                String(item.id) ===
-                String(id)
-        );
+    const html =
+        dayRecords.map(recordItemHTML).join("") +
+        dayLeaves.map(leaveItemHTML).join("") +
+        dayMileage.map(mileageItemHTML).join("");
 
+    $("dayModalTitle").textContent = formatDate(date);
+    $("dayItems").innerHTML = html || '<div class="empty">這一天還沒有紀錄</div>';
 
-    if (!record) {
-        return;
-    }
+    $("dayFoot").innerHTML = `
+        <button class="btn primary" type="button" data-action="add-record" data-date="${date}">＋ 出勤</button>
+        <button class="btn" type="button" data-action="add-leave" data-date="${date}">＋ 請假／未上班</button>
+        <button class="btn" type="button" data-action="add-mileage" data-date="${date}">＋ 里程</button>
+    `;
 
-
-    const confirmed =
-        confirm(
-            "確定要刪除這筆里程紀錄嗎？"
-        );
-
-
-    if (!confirmed) {
-        return;
-    }
-
-
-    mileageRecords =
-        mileageRecords.filter(
-            item =>
-                String(item.id) !==
-                String(id)
-        );
-
-
-    saveData();
-
-    render();
+    openModal("dayModal");
 }
 
 
 /* =========================================================
-   SETTINGS
+   設定
 ========================================================= */
+
+function historyRowHTML(row = {}) {
+    return `
+        <div class="row-item" data-row="history">
+            <input type="month" class="h-until" value="${escapeHTML(row.until || "")}" aria-label="到哪個月為止">
+            <input type="number" class="amt h-salary" min="0" step="1" inputmode="numeric" placeholder="當時月薪" value="${escapeHTML(row.salary ?? "")}" aria-label="當時月薪">
+            <button class="row-del" type="button" data-action="row-del" aria-label="刪除這一列">✕</button>
+        </div>
+    `;
+}
+
+function fixedRowHTML(row = {}) {
+    const kind = row.kind === "income" ? "income" : "deduct";
+
+    return `
+        <div class="row-item three" data-row="fixed" data-id="${escapeHTML(row.id || "")}">
+            <select class="f-kind" aria-label="類型">
+                <option value="deduct" ${kind === "deduct" ? "selected" : ""}>扣款 −</option>
+                <option value="income" ${kind === "income" ? "selected" : ""}>收入 ＋</option>
+            </select>
+            <input type="text" class="f-name" placeholder="名稱，例如：健保費" value="${escapeHTML(row.name || "")}" aria-label="名稱">
+            <input type="number" class="amt f-amount" min="0" step="1" inputmode="numeric" placeholder="金額" value="${escapeHTML(row.amount ?? "")}" aria-label="金額">
+            <button class="row-del" type="button" data-action="row-del" aria-label="刪除這一列">✕</button>
+        </div>
+    `;
+}
+
+function updateSalaryHint() {
+    const salary = Math.max(0, num($("salary").value));
+    const divisor = num($("dayDivisor").value) > 0 ? num($("dayDivisor").value) : 30;
+    const hourly = salary / (divisor * 8);
+
+    $("salaryHint").textContent =
+        `時薪 ${money(hourly)}・日薪 ${money(salary / divisor)}・加班第 1–2 小時每小時 ${money(hourly * 1.34)}`;
+}
 
 function openSettings() {
+    $("salary").value = settings.salary;
+    $("normalStart").value = settings.normalStart;
+    $("normalEnd").value = settings.normalEnd;
+    $("overtimeStart").value = settings.overtimeStart;
+    $("otLimit").value = settings.otLimit;
+    $("earlyOvertime").checked = settings.earlyOvertime;
+    $("fullAttendance").value = settings.fullAttendance;
+    $("fullAttendanceIncluded").checked = settings.fullAttendanceIncluded;
+    $("dayDivisor").value = settings.dayDivisor;
 
-    const modal =
-        $("settingsModal");
+    $("salaryHistoryRows").innerHTML = settings.salaryHistory.map(historyRowHTML).join("");
+    $("fixedRows").innerHTML = settings.fixedItems.map(fixedRowHTML).join("");
 
-
-    if (!modal) {
-        return;
-    }
-
-
-    $("salary").value =
-        settings.salary;
-
-
-    $("normalStart").value =
-        settings.normalStart;
-
-
-    $("normalEnd").value =
-        settings.normalEnd;
-
-
-    $("overtimeStart").value =
-        settings.overtimeStart;
-
-
-    modal.classList.add(
-        "show"
-    );
+    updateSalaryHint();
+    openModal("settingsModal");
 }
 
-
-function closeSettingsModal() {
-
-    const modal =
-        $("settingsModal");
-
-
-    if (modal) {
-
-        modal.classList.remove(
-            "show"
-        );
-    }
-}
-
-
-function saveSettings(
-    event
-) {
-
+function saveSettings(event) {
     event.preventDefault();
 
+    const salaryHistory = [...$("salaryHistoryRows").querySelectorAll('[data-row="history"]')]
+        .map(row => ({
+            until: row.querySelector(".h-until").value,
+            salary: Math.max(0, num(row.querySelector(".h-salary").value))
+        }))
+        .filter(row => row.until && row.salary > 0)
+        .sort((a, b) => a.until.localeCompare(b.until));
 
-    const salary =
-        Math.max(
-            0,
-            Number(
-                $("salary")
-                    .value || 0
-            )
-        );
+    const fixedItems = [...$("fixedRows").querySelectorAll('[data-row="fixed"]')]
+        .map(row => ({
+            id: row.dataset.id || uid(),
+            kind: row.querySelector(".f-kind").value === "income" ? "income" : "deduct",
+            name: row.querySelector(".f-name").value.trim(),
+            amount: Math.max(0, num(row.querySelector(".f-amount").value))
+        }))
+        .filter(row => row.name || row.amount > 0);
 
-
-    const normalStart =
-        $("normalStart")
-            .value ||
-        "08:00";
-
-
-    const normalEnd =
-        $("normalEnd")
-            .value ||
-        "17:30";
-
-
-    const overtimeStart =
-        $("overtimeStart")
-            .value ||
-        "17:30";
-
-
-    settings = {
-
+    settings = normaliseSettings({
         ...settings,
-
-        salary,
-
-        normalStart,
-
-        normalEnd,
-
-        overtimeStart
-    };
-
+        salary: Math.max(0, num($("salary").value)),
+        normalStart: $("normalStart").value || "08:00",
+        normalEnd: $("normalEnd").value || "17:30",
+        overtimeStart: $("overtimeStart").value || "17:30",
+        otLimit: Math.max(0, num($("otLimit").value)),
+        earlyOvertime: $("earlyOvertime").checked,
+        fullAttendance: Math.max(0, num($("fullAttendance").value)),
+        fullAttendanceIncluded: $("fullAttendanceIncluded").checked,
+        dayDivisor: num($("dayDivisor").value) > 0 ? num($("dayDivisor").value) : 30,
+        salaryHistory,
+        fixedItems
+    });
 
     saveData();
+    closeModals();
+    resetQuickStart();
+    renderAll();
+    toast("設定已儲存");
+}
 
-    closeSettingsModal();
-
-    render();
+function resetQuickStart() {
+    if ($("quickStart")) $("quickStart").value = settings.normalStart;
 }
 
 
 /* =========================================================
-   CLEAR DATA
+   收入帳本：計算
+========================================================= */
+
+function sumRows(rows) {
+    return (Array.isArray(rows) ? rows : []).reduce((sum, row) => sum + num(row.amount), 0);
+}
+
+function sumKey(rows, key) {
+    return (Array.isArray(rows) ? rows : [])
+        .filter(row => row.key === key)
+        .reduce((sum, row) => sum + num(row.amount), 0);
+}
+
+function hasValue(value) {
+    return value !== null && value !== undefined && value !== "";
+}
+
+function slipTotals(slip) {
+    const income = sumRows(slip.income);
+    const deduct = sumRows(slip.deduct);
+    const base = sumKey(slip.income, "base");
+    const ot = sumKey(slip.income, "ot");
+
+    return {
+        income,
+        deduct,
+        base,
+        ot,
+        other: income - base - ot,
+        net: hasValue(slip.received) ? num(slip.received) : income - deduct
+    };
+}
+
+function yearStats(year) {
+    const months = [];
+
+    for (let m = 1; m <= 12; m++) {
+        const month = year + "-" + pad2(m);
+        const slip = settings.payslips[month] || null;
+        const bonus = settings.bonuses
+            .filter(item => getMonthFromDate(item.date) === month)
+            .reduce((sum, item) => sum + num(item.amount), 0);
+
+        months.push({
+            month,
+            index: m,
+            slip,
+            totals: slip ? slipTotals(slip) : null,
+            bonus
+        });
+    }
+
+    const filled = months.filter(item => item.slip);
+    const full = filled.filter(item => !item.slip.partial);
+    const sum = (list, pick) => list.reduce((total, item) => total + pick(item), 0);
+
+    const netTotal = sum(filled, item => item.totals.net);
+    const incomeTotal = sum(filled, item => item.totals.income);
+    const deductTotal = sum(filled, item => item.totals.deduct);
+    const otTotal = sum(filled, item => item.totals.ot);
+    const bonusTotal = sum(months, item => item.bonus);
+    const bonusCount = settings.bonuses.filter(item => String(item.date || "").startsWith(year + "-")).length;
+
+    const avgNet = full.length ? sum(full, item => item.totals.net) / full.length : 0;
+
+    // 推估全年：用最近三個整月的平均，補上還沒填的月份。
+    const recent = full.slice(-3);
+    const recentAvg = recent.length ? sum(recent, item => item.totals.net) / recent.length : 0;
+    const lastIndex = filled.length ? filled[filled.length - 1].index : 0;
+    const isCurrentYear = year === new Date().getFullYear();
+    const remaining = isCurrentYear && filled.length ? 12 - lastIndex : 0;
+
+    const best = filled.reduce(
+        (top, item) => (!top || item.totals.net > top.totals.net ? item : top),
+        null
+    );
+
+    return {
+        months,
+        filled,
+        full,
+        netTotal,
+        incomeTotal,
+        deductTotal,
+        otTotal,
+        bonusTotal,
+        bonusCount,
+        avgNet,
+        yearTotal: netTotal + bonusTotal,
+        remaining,
+        projection: netTotal + bonusTotal + recentAvg * remaining,
+        best
+    };
+}
+
+
+/* =========================================================
+   收入帳本：畫面
+========================================================= */
+
+function shortMoney(value) {
+    const n = Math.round(num(value));
+    return Math.abs(n) >= 10000 ? (n / 10000).toFixed(1) + "萬" : n.toLocaleString("zh-TW");
+}
+
+function renderLedger() {
+    const s = yearStats(selectedYear);
+
+    if ($("yearLabel")) {
+        $("yearLabel").innerHTML = `${selectedYear}<small>民國 ${selectedYear - 1911} 年</small>`;
+    }
+
+    renderKpis(s);
+    renderChart(s);
+    renderLedgerTable(s);
+    renderBonuses();
+}
+
+function renderKpis(s) {
+    const el = $("kpis");
+    if (!el) return;
+
+    const count = s.filled.length;
+    const otShare = s.incomeTotal > 0 ? Math.round(s.otTotal / s.incomeTotal * 100) : 0;
+
+    el.innerHTML = `
+        <div class="kpi lead">
+            <span>年度實領總額</span>
+            <strong>${signedMoney(s.yearTotal)}</strong>
+            <small>月薪 ${money(s.netTotal)} ＋ 獎金 ${money(s.bonusTotal)}</small>
+        </div>
+        <div class="kpi">
+            <span>月平均實領</span>
+            <strong>${money(s.avgNet)}</strong>
+            <small>${s.full.length} 個整月平均，不含獎金</small>
+        </div>
+        <div class="kpi">
+            <span>${s.remaining > 0 ? "預估全年收入" : "年度應發總額"}</span>
+            <strong>${money(s.remaining > 0 ? s.projection : s.incomeTotal)}</strong>
+            <small>${s.remaining > 0 ? `剩 ${s.remaining} 個月以近期平均推估` : `已填 ${count} 個月`}</small>
+        </div>
+        <div class="kpi">
+            <span>含獎金月平均</span>
+            <strong>${money(count ? s.yearTotal / count : 0)}</strong>
+            <small>年度實領 ÷ ${count} 個月</small>
+        </div>
+        <div class="kpi">
+            <span>加班費合計</span>
+            <strong>${money(s.otTotal)}</strong>
+            <small>占應發 ${otShare}%</small>
+        </div>
+        <div class="kpi">
+            <span>扣款合計</span>
+            <strong>${money(s.deductTotal)}</strong>
+            <small>平均每月 ${money(count ? s.deductTotal / count : 0)}</small>
+        </div>
+        <div class="kpi">
+            <span>獎金／年終</span>
+            <strong>${money(s.bonusTotal)}</strong>
+            <small>${s.bonusCount} 筆</small>
+        </div>
+        <div class="kpi">
+            <span>最高月份</span>
+            <strong>${s.best ? money(s.best.totals.net) : "—"}</strong>
+            <small>${s.best ? s.best.index + " 月" : "尚未填寫"}</small>
+        </div>
+    `;
+}
+
+function renderChart(s) {
+    const chart = $("chart");
+    const axis = $("chartX");
+    if (!chart || !axis) return;
+
+    const heights = s.months.map(item => (item.totals ? Math.max(0, item.totals.income) : 0) + item.bonus);
+    const max = Math.max(1, ...heights);
+
+    chart.innerHTML = s.months.map((item, i) => {
+        const t = item.totals;
+        const total = heights[i];
+
+        if (!total) {
+            return `
+                <button class="bar-col" type="button" data-action="edit-slip" data-month="${item.month}" title="${item.index} 月：尚未填寫">
+                    <span class="bar-stub"></span>
+                </button>
+            `;
+        }
+
+        const segs = [
+            [t ? t.base : 0, "var(--c-base)"],
+            [t ? t.ot : 0, "var(--c-ot)"],
+            [t ? Math.max(0, t.other) : 0, "var(--c-other)"],
+            [item.bonus, "var(--c-bonus)"]
+        ].filter(seg => seg[0] > 0);
+
+        const net = (t ? t.net : 0) + item.bonus;
+        const tip = `${item.index} 月：實領 ${money(net)}` +
+            (t ? `（應發 ${money(t.income)}、扣款 ${money(t.deduct)}）` : "") +
+            (item.bonus ? `、獎金 ${money(item.bonus)}` : "");
+
+        return `
+            <button class="bar-col" type="button" data-action="edit-slip" data-month="${item.month}" title="${escapeHTML(tip)}">
+                <span class="bar-val">${shortMoney(net)}</span>
+                <span class="bar" style="height:calc((100% - 20px) * ${(total / max).toFixed(4)})">
+                    ${segs.map(seg => `<i style="flex:${Math.round(seg[0])} 1 0;background:${seg[1]}"></i>`).join("")}
+                </span>
+            </button>
+        `;
+    }).join("");
+
+    axis.innerHTML = s.months.map(item => `<span>${item.index}月</span>`).join("");
+}
+
+function renderLedgerTable(s) {
+    const el = $("ledgerTable");
+    if (!el) return;
+
+    const rows = s.months.map(item => {
+        const calc = computeMonth(item.month);
+        const estimate = calc.hasData ? calc.payNet : null;
+
+        if (!item.slip) {
+            return `
+                <tr class="blank">
+                    <td>${item.index} 月</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td class="col-hide">${estimate === null ? "—" : money(estimate)}</td>
+                    <td class="col-hide">—</td>
+                    <td><button class="btn sm" type="button" data-action="edit-slip" data-month="${item.month}">填寫</button></td>
+                </tr>
+            `;
+        }
+
+        const t = item.totals;
+        const diff = estimate === null ? null : t.net - estimate;
+        const memo = [item.slip.partial ? "未滿整月" : "", item.slip.note || ""].filter(Boolean).join("・");
+
+        return `
+            <tr>
+                <td>${item.index} 月${memo ? `<span class="memo">${escapeHTML(memo)}</span>` : ""}</td>
+                <td>${money(t.income)}</td>
+                <td class="${t.deduct > 0 ? "neg" : ""}">${t.deduct > 0 ? "−" + money(t.deduct) : "$0"}</td>
+                <td class="net">${signedMoney(t.net)}</td>
+                <td class="col-hide">${estimate === null ? "—" : money(estimate)}</td>
+                <td class="col-hide ${diff === null || Math.round(diff) === 0 ? "" : diff > 0 ? "pos" : "neg"}">${diff === null ? "—" : (diff > 0 ? "+" : "") + signedMoney(diff)}</td>
+                <td><button class="btn sm" type="button" data-action="edit-slip" data-month="${item.month}">編輯</button></td>
+            </tr>
+        `;
+    });
+
+    el.innerHTML = `
+        <thead>
+            <tr>
+                <th>月份</th>
+                <th>應發</th>
+                <th>扣款</th>
+                <th>實領</th>
+                <th class="col-hide">試算</th>
+                <th class="col-hide">差額</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            ${rows.join("")}
+            <tr class="sum">
+                <td>全年合計</td>
+                <td>${money(s.incomeTotal)}</td>
+                <td class="${s.deductTotal > 0 ? "neg" : ""}">${s.deductTotal > 0 ? "−" : ""}${money(s.deductTotal)}</td>
+                <td class="net">${signedMoney(s.netTotal)}</td>
+                <td class="col-hide"></td>
+                <td class="col-hide"></td>
+                <td></td>
+            </tr>
+        </tbody>
+    `;
+}
+
+function renderBonuses() {
+    const el = $("bonuses");
+    if (!el) return;
+
+    const list = sortByDate(
+        settings.bonuses.filter(item => String(item.date || "").startsWith(selectedYear + "-")),
+        "desc"
+    );
+
+    el.innerHTML = list.length
+        ? list.map(item => `
+            <div class="item">
+                <div class="item-top">
+                    <div>
+                        <div class="item-title">${escapeHTML(item.name || "獎金")}</div>
+                        <div class="item-sub">${escapeHTML(formatDate(item.date))}${item.note ? "<br>" + escapeHTML(item.note) : ""}</div>
+                    </div>
+                    <div class="item-amt">${money(item.amount)}</div>
+                </div>
+                <div class="item-foot">
+                    <div class="tags"><span class="tag gold">獎金</span></div>
+                    <div class="item-btns">
+                        <button class="link-btn" type="button" data-action="edit-bonus" data-id="${escapeHTML(item.id)}">編輯</button>
+                        <button class="link-btn del" type="button" data-action="delete-bonus" data-id="${escapeHTML(item.id)}">刪除</button>
+                    </div>
+                </div>
+            </div>
+        `).join("")
+        : `<div class="empty">${selectedYear} 年還沒有獎金或年終紀錄</div>`;
+}
+
+
+/* =========================================================
+   月薪單（每月實領）
+========================================================= */
+
+let slipOriginalMonth = "";
+
+function slipRowHTML(row = {}) {
+    return `
+        <div class="row-item" data-row="slip" data-key="${escapeHTML(row.key || "")}">
+            <input type="text" class="s-name" placeholder="項目名稱" value="${escapeHTML(row.name || "")}" aria-label="項目名稱">
+            <input type="number" class="amt s-amount" step="1" inputmode="numeric" placeholder="0" value="${escapeHTML(hasValue(row.amount) && num(row.amount) !== 0 ? row.amount : "")}" aria-label="金額">
+            <button class="row-del" type="button" data-action="row-del" aria-label="刪除這一列">✕</button>
+        </div>
+    `;
+}
+
+function readSlipRows(containerId) {
+    return [...$(containerId).querySelectorAll('[data-row="slip"]')]
+        .map(row => {
+            const item = {
+                name: row.querySelector(".s-name").value.trim(),
+                amount: num(row.querySelector(".s-amount").value)
+            };
+            if (row.dataset.key) item.key = row.dataset.key;
+            return item;
+        })
+        .filter(item => item.name || item.amount);
+}
+
+function newSlipTemplate(month) {
+    // 沿用最近一次填過的項目；扣款金額（勞健保、眷屬）直接帶入。
+    const months = Object.keys(settings.payslips).sort();
+    const previous = months.filter(key => key < month).pop() || months.pop();
+
+    if (!previous) {
+        return {
+            income: SLIP_TEMPLATE.income.map(row => ({ ...row, amount: "" })),
+            deduct: SLIP_TEMPLATE.deduct.map(row => ({ ...row, amount: "" }))
+        };
+    }
+
+    const source = settings.payslips[previous];
+
+    return {
+        income: (source.income || []).map(row => ({
+            ...row,
+            amount: row.key === "base" ? row.amount : ""
+        })),
+        deduct: (source.deduct || []).map(row => ({ ...row }))
+    };
+}
+
+function loadSlipIntoForm(month) {
+    const existing = settings.payslips[month];
+    const slip = existing || newSlipTemplate(month);
+
+    const withTemplate = (rows, template) => {
+        const list = (rows || []).map(row => ({ ...row }));
+        template.forEach(item => {
+            if (!list.some(row => row.key === item.key)) list.push({ ...item, amount: "" });
+        });
+        return list;
+    };
+
+    $("slipModalTitle").textContent = (existing ? "編輯 " : "填寫 ") + formatMonth(month) + " 月薪";
+    $("slipIncome").innerHTML = withTemplate(slip.income, SLIP_TEMPLATE.income).map(slipRowHTML).join("");
+    $("slipDeduct").innerHTML = withTemplate(slip.deduct, SLIP_TEMPLATE.deduct).map(slipRowHTML).join("");
+    $("slipReceived").value = existing && hasValue(existing.received) ? existing.received : "";
+    $("slipPartial").checked = Boolean(existing && existing.partial);
+    $("slipNote").value = existing ? existing.note || "" : "";
+    $("slipDeleteBtn").hidden = !existing;
+
+    updateSlipSummary();
+}
+
+function openSlip(month = null) {
+    const target = month || (
+        selectedYear === new Date().getFullYear()
+            ? getCurrentMonth()
+            : selectedYear + "-01"
+    );
+
+    slipOriginalMonth = settings.payslips[target] ? target : "";
+    $("slipMonth").value = target;
+    loadSlipIntoForm(target);
+    openModal("slipModal");
+}
+
+function updateSlipSummary() {
+    const income = sumRows(readSlipRows("slipIncome"));
+    const deduct = sumRows(readSlipRows("slipDeduct"));
+    const received = $("slipReceived").value;
+
+    $("slipSumIncome").textContent = money(income);
+    $("slipSumDeduct").textContent = (deduct > 0 ? "−" : "") + money(deduct);
+    $("slipSumNet").textContent = signedMoney(hasValue(received) ? num(received) : income - deduct);
+}
+
+function setSlipRow(containerId, match, name, amount, key = "") {
+    const rows = [...$(containerId).querySelectorAll('[data-row="slip"]')];
+    let row = rows.find(match);
+
+    if (!row) {
+        if (!amount) return;
+        $(containerId).insertAdjacentHTML("beforeend", slipRowHTML({ key, name, amount }));
+        return;
+    }
+
+    row.querySelector(".s-amount").value = amount ? Math.round(amount) : "";
+}
+
+function fillSlipFromCalc() {
+    const month = $("slipMonth").value;
+
+    if (!month) {
+        alert("請先選擇薪資月份。");
+        return;
+    }
+
+    const c = computeMonth(month);
+    const byKey = key => row => row.dataset.key === key;
+    const byName = name => row => row.querySelector(".s-name").value.trim() === name;
+
+    setSlipRow("slipIncome", byKey("base"), "基本薪資", c.salary + c.faBonus - c.attendanceDeduct, "base");
+    setSlipRow("slipIncome", byKey("ot"), "加班費", c.overtimePay, "ot");
+    setSlipRow("slipIncome", byKey("mileage"), "里程補助", c.mileageGross, "mileage");
+
+    settings.fixedItems.forEach(item => {
+        if (!item.name) return;
+        setSlipRow(item.kind === "income" ? "slipIncome" : "slipDeduct", byName(item.name), item.name, num(item.amount));
+    });
+
+    c.monthItems.forEach(item => {
+        if (!item.name) return;
+        setSlipRow(item.kind === "income" ? "slipIncome" : "slipDeduct", byName(item.name), item.name, num(item.amount));
+    });
+
+    updateSlipSummary();
+    toast("已帶入 " + formatMonth(month) + " 的試算金額");
+}
+
+function saveSlip(event) {
+    event.preventDefault();
+
+    const month = $("slipMonth").value;
+
+    if (!month) {
+        alert("請選擇薪資月份。");
+        return;
+    }
+
+    if (month !== slipOriginalMonth && settings.payslips[month]) {
+        if (!confirm(formatMonth(month) + " 已經有紀錄，要覆蓋嗎？")) return;
+    }
+
+    const received = $("slipReceived").value;
+
+    const slip = {
+        income: readSlipRows("slipIncome"),
+        deduct: readSlipRows("slipDeduct"),
+        received: hasValue(received) ? num(received) : null,
+        partial: $("slipPartial").checked,
+        note: $("slipNote").value.trim()
+    };
+
+    if (slipOriginalMonth && slipOriginalMonth !== month) {
+        delete settings.payslips[slipOriginalMonth];
+    }
+
+    settings.payslips[month] = slip;
+    selectedYear = Number(month.slice(0, 4)) || selectedYear;
+
+    saveData();
+    closeModals();
+    renderLedger();
+    toast(formatMonth(month) + " 已儲存");
+}
+
+function deleteSlip() {
+    if (!slipOriginalMonth) return;
+    if (!confirm("確定要刪除 " + formatMonth(slipOriginalMonth) + " 的月薪紀錄嗎？")) return;
+
+    delete settings.payslips[slipOriginalMonth];
+    saveData();
+    closeModals();
+    renderLedger();
+}
+
+
+/* =========================================================
+   獎金／年終
+========================================================= */
+
+function openBonus(id = null) {
+    $("bonusForm").reset();
+    $("bonusId").value = "";
+
+    const bonus = id ? settings.bonuses.find(item => String(item.id) === String(id)) : null;
+
+    if (id && !bonus) return;
+
+    if (bonus) {
+        $("bonusModalTitle").textContent = "編輯獎金";
+        $("bonusId").value = bonus.id;
+        $("bonusDate").value = bonus.date || "";
+        $("bonusName").value = bonus.name || "";
+        $("bonusAmount").value = bonus.amount ?? "";
+        $("bonusNote").value = bonus.note || "";
+    } else {
+        $("bonusModalTitle").textContent = "新增獎金／年終";
+        $("bonusDate").value =
+            selectedYear === new Date().getFullYear() ? getTodayString() : selectedYear + "-01-01";
+    }
+
+    openModal("bonusModal");
+}
+
+function saveBonus(event) {
+    event.preventDefault();
+
+    const id = $("bonusId").value.trim();
+
+    const data = {
+        id: id || uid(),
+        date: $("bonusDate").value,
+        name: $("bonusName").value.trim(),
+        amount: Math.max(0, num($("bonusAmount").value)),
+        note: $("bonusNote").value.trim()
+    };
+
+    if (!data.date || !data.name) {
+        alert("請填寫日期與名稱。");
+        return;
+    }
+
+    const index = settings.bonuses.findIndex(item => String(item.id) === String(id));
+
+    if (id && index !== -1) settings.bonuses[index] = data;
+    else settings.bonuses.push(data);
+
+    selectedYear = Number(data.date.slice(0, 4)) || selectedYear;
+    saveData();
+    closeModals();
+    renderLedger();
+    toast("獎金已儲存");
+}
+
+function deleteBonus(id) {
+    if (!confirm("確定要刪除這筆獎金紀錄嗎？")) return;
+
+    settings.bonuses = settings.bonuses.filter(item => String(item.id) !== String(id));
+    saveData();
+    renderLedger();
+}
+
+
+/* =========================================================
+   清除／匯出／匯入
 ========================================================= */
 
 function clearCurrentMonth() {
+    if (!confirm(`確定要清除 ${formatMonth(selectedMonth)} 的出勤、請假、里程與單月補貼／扣款嗎？\n（收入帳本不受影響）`)) return;
 
-    const confirmed =
-        confirm(
-            "確定要清除目前月份的所有出勤與里程紀錄嗎？"
-        );
-
-
-    if (!confirmed) {
-        return;
-    }
-
-
-    records =
-        records.filter(
-            record =>
-                getMonthFromDate(
-                    record.date
-                ) !==
-                selectedMonth
-        );
-
-
-    mileageRecords =
-        mileageRecords.filter(
-            record =>
-                getMonthFromDate(
-                    record.date
-                ) !==
-                selectedMonth
-        );
-
+    records = records.filter(item => getMonthFromDate(item.date) !== selectedMonth);
+    mileageRecords = mileageRecords.filter(item => getMonthFromDate(item.date) !== selectedMonth);
+    settings.leaves = settings.leaves.filter(item => getMonthFromDate(item.date) !== selectedMonth);
+    settings.monthItems = settings.monthItems.filter(item => item.month !== selectedMonth);
 
     saveData();
-
-    render();
+    renderAll();
 }
-
 
 function clearAllRecords() {
-
-    const confirmed =
-        confirm(
-            "確定要清除全部出勤與里程資料嗎？此操作無法復原。"
-        );
-
-
-    if (!confirmed) {
-        return;
-    }
-
-
-    const secondConfirm =
-        confirm(
-            "再次確認：真的要刪除全部資料嗎？"
-        );
-
-
-    if (!secondConfirm) {
-        return;
-    }
-
+    if (!confirm("確定要清除全部月份的出勤、請假、里程與單月補貼／扣款嗎？此操作無法復原。\n（設定與收入帳本會保留）")) return;
+    if (!confirm("再次確認：真的要刪除全部出勤資料嗎？")) return;
 
     records = [];
-
     mileageRecords = [];
-
+    settings.leaves = [];
+    settings.monthItems = [];
 
     saveData();
-
-    render();
+    renderAll();
 }
 
-
-/* =========================================================
-   JSON EXPORT
-========================================================= */
-
 function exportData() {
-
     const data = {
-
-        version:
-            "YAO_OVERTIME_V2.0",
-
-        exportedAt:
-            new Date()
-                .toISOString(),
-
+        version: "YAO_OVERTIME_V3.0",
+        exportedAt: new Date().toISOString(),
         records,
-
         mileageRecords,
-
         settings
     };
 
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json;charset=utf-8"
+    });
 
-    const blob =
-        new Blob(
-            [
-                JSON.stringify(
-                    data,
-                    null,
-                    2
-                )
-            ],
-            {
-                type:
-                    "application/json;charset=utf-8"
-            }
-        );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
 
-
-    const url =
-        URL.createObjectURL(
-            blob
-        );
-
-
-    const link =
-        document.createElement(
-            "a"
-        );
-
-
-    link.href =
-        url;
-
-
-    link.download =
-        "YAO_加班費資料_" +
-        selectedMonth +
-        ".json";
-
-
-    document.body.appendChild(
-        link
-    );
-
-
+    link.href = url;
+    link.download = "YAO_薪資備份_" + getTodayString() + ".json";
+    document.body.appendChild(link);
     link.click();
-
     link.remove();
 
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
-    setTimeout(
-        () => {
+function importData(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-            URL.revokeObjectURL(
-                url
-            );
+    const reader = new FileReader();
 
-        },
-        1000
-    );
+    reader.onload = function () {
+        try {
+            const data = JSON.parse(reader.result);
+
+            if (!data || typeof data !== "object") throw new Error("資料格式錯誤");
+
+            // 只含收入帳本的檔案：合併進現有資料，不動出勤。
+            if (data.ledgerOnly) {
+                const slips = data.payslips && typeof data.payslips === "object" ? data.payslips : {};
+                const bonuses = Array.isArray(data.bonuses) ? data.bonuses : [];
+                const count = Object.keys(slips).length;
+
+                if (!confirm(`要匯入 ${count} 個月的月薪紀錄與 ${bonuses.length} 筆獎金嗎？同月份會被檔案內容取代。`)) return;
+
+                settings.payslips = { ...settings.payslips, ...slips };
+
+                bonuses.forEach(bonus => {
+                    if (!settings.bonuses.some(item => String(item.id) === String(bonus.id))) {
+                        settings.bonuses.push(bonus);
+                    }
+                });
+
+                const firstMonth = Object.keys(slips).sort()[0];
+                if (firstMonth) selectedYear = Number(firstMonth.slice(0, 4)) || selectedYear;
+
+                saveData();
+                renderAll();
+                switchTab("ledger");
+                toast("收入帳本匯入完成");
+                return;
+            }
+
+            if (!confirm("匯入會覆蓋目前的出勤、里程與設定，確定要繼續嗎？")) return;
+
+            if (Array.isArray(data.records)) records = data.records;
+            if (Array.isArray(data.mileageRecords)) mileageRecords = data.mileageRecords;
+
+            if (data.settings && typeof data.settings === "object") {
+                // 舊版備份沒有 V3 的欄位，保留目前已填的請假與收入帳本。
+                settings = normaliseSettings({ ...settings, ...data.settings });
+            }
+
+            saveData();
+            resetQuickStart();
+            renderAll();
+            toast("資料匯入完成");
+
+        } catch (error) {
+            console.error("匯入失敗：", error);
+            alert("匯入失敗，請確認 JSON 檔案是否正確。");
+        } finally {
+            event.target.value = "";
+        }
+    };
+
+    reader.readAsText(file, "utf-8");
 }
 
 
 /* =========================================================
-   JSON IMPORT
+   分頁
 ========================================================= */
 
-function importData(
-    event
-) {
+function switchTab(tab) {
+    activeTab = tab === "ledger" ? "ledger" : "calc";
+    localStorage.setItem(TAB_KEY, activeTab);
 
-    const file =
-        event.target.files?.[0];
+    $("tab-calc").hidden = activeTab !== "calc";
+    $("tab-ledger").hidden = activeTab !== "ledger";
 
+    document.querySelectorAll(".tab").forEach(button => {
+        button.classList.toggle("active", button.dataset.tab === activeTab);
+    });
 
-    if (!file) {
-        return;
-    }
+    if (activeTab === "ledger") renderLedger();
+    else render();
 
-
-    const reader =
-        new FileReader();
-
-
-    reader.onload =
-        function () {
-
-            try {
-
-                const data =
-                    JSON.parse(
-                        reader.result
-                    );
-
-
-                if (
-                    !data ||
-                    typeof data !==
-                        "object"
-                ) {
-
-                    throw new Error(
-                        "資料格式錯誤"
-                    );
-                }
-
-
-                const confirmed =
-                    confirm(
-                        "匯入資料會覆蓋目前資料，確定要繼續嗎？"
-                    );
-
-
-                if (!confirmed) {
-                    return;
-                }
-
-
-                if (
-                    Array.isArray(
-                        data.records
-                    )
-                ) {
-
-                    records =
-                        data.records;
-                }
-
-
-                if (
-                    Array.isArray(
-                        data.mileageRecords
-                    )
-                ) {
-
-                    mileageRecords =
-                        data.mileageRecords;
-                }
-
-
-                if (
-                    data.settings &&
-                    typeof data.settings ===
-                        "object"
-                ) {
-
-                    settings = {
-
-                        ...DEFAULT_SETTINGS,
-
-                        ...data.settings
-                    };
-                }
-
-
-                saveData();
-
-                render();
-
-
-                alert(
-                    "資料匯入完成。"
-                );
-
-
-            } catch (error) {
-
-                console.error(
-                    "匯入失敗：",
-                    error
-                );
-
-
-                alert(
-                    "匯入失敗，請確認 JSON 檔案是否正確。"
-                );
-
-
-            } finally {
-
-                event.target.value =
-                    "";
-            }
-
-        };
-
-
-    reader.readAsText(
-        file,
-        "utf-8"
-    );
+    window.scrollTo({ top: 0 });
 }
-
-
 /* =========================================================
    PDF HELPERS
 ========================================================= */
@@ -3137,16 +2790,17 @@ function getPDFTotals() {
     );
 
 
+    const monthCalc =
+        computeMonth(selectedMonth);
+
+    // V3：總收入含請假扣薪、全勤、補貼與固定扣款。
     const extraIncome =
-        overtimePay +
-        mileageNet;
+        monthCalc.totalIncome -
+        monthCalc.salary;
 
 
     const totalIncome =
-        Number(
-            settings.salary || 0
-        ) +
-        extraIncome;
+        monthCalc.totalIncome;
 
 
     return {
@@ -4625,7 +4279,7 @@ tr {
 
                 <div class="value">
                     ${pdfMoney(
-                        settings.salary
+                        getSalaryForMonth(selectedMonth)
                     )}
                 </div>
 
@@ -4796,7 +4450,7 @@ tr {
                 <strong>
                     ${pdfMoney(
                         Number(
-                            settings.salary || 0
+                            getSalaryForMonth(selectedMonth) || 0
                         ) / 240
                     )}
                 </strong>
@@ -5155,7 +4809,7 @@ tr {
                 <span class="settlement-value">
 
                     ${pdfMoney(
-                        settings.salary
+                        getSalaryForMonth(selectedMonth)
                     )}
 
                 </span>
@@ -5261,7 +4915,7 @@ tr {
                 <strong>
 
                     ${pdfMoney(
-                        settings.salary
+                        getSalaryForMonth(selectedMonth)
                     )}
 
                 </strong>
@@ -5330,6 +4984,7 @@ tr {
             加班倍率依 1.34 倍、1.67 倍及 2.67 倍分段計算。
             平日加班依設定的平日加班開始時間計算；
             休假日及國定／公司假日依實際工作時間扣除休息時間後計算。
+                    ${escapeHTML(getPDFAdjustNote())}
 
         </div>
 
@@ -5427,342 +5082,136 @@ function exportSalaryPDF() {
 }
 
 
+
+
 /* =========================================================
    EVENT BINDING
 ========================================================= */
 
-function bindEvents() {
-
-    $("settingsBtn")
-        ?.addEventListener(
-            "click",
-            openSettings
-        );
-
-
-    $("closeSettingsModal")
-        ?.addEventListener(
-            "click",
-            closeSettingsModal
-        );
-
-
-    $("cancelSettingsBtn")
-        ?.addEventListener(
-            "click",
-            closeSettingsModal
-        );
-
-
-    $("settingsForm")
-        ?.addEventListener(
-            "submit",
-            saveSettings
-        );
-
-
-    $("addRecordBtn")
-        ?.addEventListener(
-            "click",
-            () => openRecord()
-        );
-
-
-    $("quickSaveBtn")
-        ?.addEventListener("click", saveQuickRecord);
-
-    $("quickDetailBtn")
-        ?.addEventListener("click", openQuickDetail);
-
-    $("quickEnd")
-        ?.addEventListener("input", updateQuickRecordPreview);
-
-    $("todayBtn")
-        ?.addEventListener("click", goCurrentMonth);
-
-    $("recordSort")
-        ?.addEventListener("change", event => changeRecordSort(event.target.value));
-
-
-    $("closeRecordModal")
-        ?.addEventListener(
-            "click",
-            closeRecordModal
-        );
-
-
-    $("cancelRecordBtn")
-        ?.addEventListener(
-            "click",
-            closeRecordModal
-        );
-
-
-    $("recordForm")
-        ?.addEventListener(
-            "submit",
-            saveRecord
-        );
-
-
-    $("date")
-        ?.addEventListener(
-            "change",
-            updateRecordPreview
-        );
-
-
-    $("dayType")
-        ?.addEventListener(
-            "change",
-            updateRecordPreview
-        );
-
-
-    $("start")
-        ?.addEventListener(
-            "input",
-            updateRecordPreview
-        );
-
-
-    $("end")
-        ?.addEventListener(
-            "input",
-            updateRecordPreview
-        );
-
-
-    $("breakMinutes")
-        ?.addEventListener(
-            "input",
-            updateRecordPreview
-        );
-
-
-    $("addMileageBtn")
-        ?.addEventListener(
-            "click",
-            () => openMileage()
-        );
-
-
-    $("closeMileageModal")
-        ?.addEventListener(
-            "click",
-            closeMileageModal
-        );
-
-
-    $("cancelMileageBtn")
-        ?.addEventListener(
-            "click",
-            closeMileageModal
-        );
-
-
-    $("mileageForm")
-        ?.addEventListener(
-            "submit",
-            saveMileage
-        );
-
-
-    $("mileageKmInput")
-        ?.addEventListener(
-            "input",
-            updateMileagePreview
-        );
-
-
-    $("mileageRate")
-        ?.addEventListener(
-            "input",
-            updateMileagePreview
-        );
-
-
-    $("mileageWearRate")
-        ?.addEventListener(
-            "input",
-            updateMileagePreview
-        );
-
-
-    $("mileageWearInput")
-        ?.addEventListener(
-            "input",
-            updateMileagePreview
-        );
-
-
-    $("prevMonth")
-        ?.addEventListener(
-            "click",
-            () => changeMonth(-1)
-        );
-
-
-    $("nextMonth")
-        ?.addEventListener(
-            "click",
-            () => changeMonth(1)
-        );
-
-
-    $("monthPicker")
-        ?.addEventListener(
-            "change",
-            event => {
-
-                if (
-                    event.target.value
-                ) {
-
-                    selectedMonth =
-                        event.target.value;
-
-                    render();
-                }
-
-            }
-        );
-
-
-    $("exportBtn")
-        ?.addEventListener(
-            "click",
-            exportData
-        );
-
-
-    $("importBtn")
-        ?.addEventListener(
-            "click",
-            () => {
-
-                $("importFile")
-                    ?.click();
-
-            }
-        );
-
-
-    $("importFile")
-        ?.addEventListener(
-            "change",
-            importData
-        );
-
-
-    $("clearMonthBtn")
-        ?.addEventListener(
-            "click",
-            clearCurrentMonth
-        );
-
-
-    $("clearAllRecordsBtn")
-        ?.addEventListener(
-            "click",
-            clearAllRecords
-        );
-
-
-    $("exportPdfBtn")
-        ?.addEventListener(
-            "click",
-            exportSalaryPDF
-        );
-
-
-    $("recordModal")
-        ?.addEventListener(
-            "click",
-            event => {
-
-                if (
-                    event.target ===
-                    $("recordModal")
-                ) {
-
-                    closeRecordModal();
-                }
-
-            }
-        );
-
-
-    $("mileageModal")
-        ?.addEventListener(
-            "click",
-            event => {
-
-                if (
-                    event.target ===
-                    $("mileageModal")
-                ) {
-
-                    closeMileageModal();
-                }
-
-            }
-        );
-
-
-    $("settingsModal")
-        ?.addEventListener(
-            "click",
-            event => {
-
-                if (
-                    event.target ===
-                    $("settingsModal")
-                ) {
-
-                    closeSettingsModal();
-                }
-
-            }
-        );
-}
-
-
-/* =========================================================
-   DATA INIT
-========================================================= */
-
-let records =
-    loadJSON(
-        STORAGE_KEY,
-        []
-    );
-
-
-let mileageRecords =
-    loadJSON(
-        MILEAGE_STORAGE_KEY,
-        []
-    );
-
-
-let settings = {
-
-    ...DEFAULT_SETTINGS,
-
-    ...loadJSON(
-        SETTINGS_KEY,
-        {}
-    )
+const ACTIONS = {
+    "tab": el => switchTab(el.dataset.tab),
+    "settings": () => openSettings(),
+    "close": () => closeModals(),
+
+    "month-prev": () => changeMonth(-1),
+    "month-next": () => changeMonth(1),
+    "month-today": () => { selectedMonth = getCurrentMonth(); render(); },
+    "year-prev": () => { selectedYear--; renderLedger(); },
+    "year-next": () => { selectedYear++; renderLedger(); },
+
+    "day": el => openDay(el.dataset.date),
+    "quick-save": () => saveQuickRecord(),
+    "quick-leave": () => openLeave(null, getTodayString()),
+
+    "add-record": el => openRecord(null, el.dataset.date || null),
+    "edit-record": el => openRecord(el.dataset.id),
+    "delete-record": el => deleteRecord(el.dataset.id),
+    "toggle-detail": el => {
+        const detail = el.closest(".item")?.querySelector(".detail");
+        if (!detail) return;
+        detail.hidden = !detail.hidden;
+        el.textContent = detail.hidden ? "詳細" : "收合";
+    },
+
+    "add-leave": el => openLeave(null, el.dataset.date || null),
+    "edit-leave": el => openLeave(el.dataset.id),
+    "delete-leave": el => deleteLeave(el.dataset.id),
+    "leave-hours": el => { $("leaveHours").value = el.dataset.hours; updateLeavePreview(); },
+
+    "add-mileage": el => openMileage(null, el.dataset.date || null),
+    "edit-mileage": el => openMileage(el.dataset.id),
+    "delete-mileage": el => deleteMileage(el.dataset.id),
+
+    "add-item": () => openItem(),
+    "edit-item": el => openItem(el.dataset.id),
+    "delete-item": el => deleteItem(el.dataset.id),
+
+    "add-slip": () => openSlip(),
+    "edit-slip": el => openSlip(el.dataset.month),
+    "slip-fill": () => fillSlipFromCalc(),
+    "slip-delete": () => deleteSlip(),
+    "slip-add-row": el => {
+        const container = $(el.dataset.side === "deduct" ? "slipDeduct" : "slipIncome");
+        container.insertAdjacentHTML("beforeend", slipRowHTML());
+        container.lastElementChild.querySelector(".s-name").focus();
+    },
+
+    "add-bonus": () => openBonus(),
+    "edit-bonus": el => openBonus(el.dataset.id),
+    "delete-bonus": el => deleteBonus(el.dataset.id),
+
+    "set-add-history": () => $("salaryHistoryRows").insertAdjacentHTML("beforeend", historyRowHTML()),
+    "set-add-fixed": () => $("fixedRows").insertAdjacentHTML("beforeend", fixedRowHTML()),
+    "row-del": el => {
+        const inSlip = Boolean(el.closest("#slipForm"));
+        el.closest(".row-item")?.remove();
+        if (inSlip) updateSlipSummary();
+    },
+
+    "export-pdf": () => exportSalaryPDF(),
+    "export": () => exportData(),
+    "import": () => $("importFile").click(),
+    "clear-month": () => clearCurrentMonth(),
+    "clear-all": () => clearAllRecords()
 };
 
+function bindEvents() {
+    document.addEventListener("click", event => {
+        const target = event.target.closest("[data-action]");
 
-let selectedMonth =
-    getCurrentMonth();
+        if (target) {
+            const handler = ACTIONS[target.dataset.action];
+            if (handler) handler(target, event);
+            return;
+        }
 
-let recordSortOrder =
-    localStorage.getItem(RECORD_SORT_KEY) ||
-    "desc";
+        // 點視窗外的暗色區域關閉。
+        if (event.target.classList?.contains("modal")) closeModals();
+    });
+
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") closeModals();
+    });
+
+    $("recordForm").addEventListener("submit", saveRecord);
+    $("leaveForm").addEventListener("submit", saveLeave);
+    $("mileageForm").addEventListener("submit", saveMileage);
+    $("itemForm").addEventListener("submit", saveItem);
+    $("slipForm").addEventListener("submit", saveSlip);
+    $("bonusForm").addEventListener("submit", saveBonus);
+    $("settingsForm").addEventListener("submit", saveSettings);
+
+    $("recordForm").addEventListener("input", updateRecordPreview);
+    $("date").addEventListener("change", () => { applyDayTypeDefault(); updateRecordPreview(); });
+    $("leaveForm").addEventListener("input", updateLeavePreview);
+    $("leaveType").addEventListener("change", applyLeaveTypeDefault);
+    $("mileageForm").addEventListener("input", updateMileagePreview);
+    $("slipForm").addEventListener("input", updateSlipSummary);
+    $("settingsForm").addEventListener("input", updateSalaryHint);
+
+    $("slipMonth").addEventListener("change", () => {
+        // 新增時換月份，就改載入那個月（已填過的月份會直接帶出來）。
+        const month = $("slipMonth").value;
+        if (!month || slipOriginalMonth) return;
+        if (settings.payslips[month]) slipOriginalMonth = month;
+        loadSlipIntoForm(month);
+    });
+
+    $("monthPicker").addEventListener("change", event => {
+        selectedMonth = event.target.value || getCurrentMonth();
+        render();
+    });
+
+    $("recordSort").addEventListener("change", event => {
+        recordSortOrder = event.target.value === "asc" ? "asc" : "desc";
+        localStorage.setItem(RECORD_SORT_KEY, recordSortOrder);
+        render();
+    });
+
+    $("quickStart").addEventListener("input", updateQuickPreview);
+    $("quickEnd").addEventListener("input", updateQuickPreview);
+    $("importFile").addEventListener("change", importData);
+}
 
 
 /* =========================================================
@@ -5772,64 +5221,21 @@ let recordSortOrder =
 window.YaoCloudDataBridge = {
 
     getData() {
-
-        return {
-            records,
-            settings,
-            mileageRecords
-        };
+        return { records, settings, mileageRecords };
     },
 
     setData(data) {
+        records = Array.isArray(data.records) ? data.records : [];
+        mileageRecords = Array.isArray(data.mileageRecords) ? data.mileageRecords : [];
 
-        records =
-            Array.isArray(
-                data.records
-            )
-                ? data.records
-                : [];
+        if (data.settings && typeof data.settings === "object") {
+            settings = normaliseSettings(data.settings);
+        }
 
-
-        mileageRecords =
-            Array.isArray(
-                data.mileageRecords
-            )
-                ? data.mileageRecords
-                : [];
-
-
-        settings =
-            data.settings &&
-            typeof data.settings === "object"
-                ? {
-                    ...DEFAULT_SETTINGS,
-                    ...data.settings
-                }
-                : settings;
-
-
-        /*
-           雲端資料收到後，同步保留在此裝置作為本機備份。
-           不能呼叫 saveData()，否則會造成無限回傳同步。
-        */
-
-        saveJSON(
-            STORAGE_KEY,
-            records
-        );
-
-        saveJSON(
-            SETTINGS_KEY,
-            settings
-        );
-
-        saveJSON(
-            MILEAGE_STORAGE_KEY,
-            mileageRecords
-        );
-
-
-        render();
+        // 雲端資料收到後保留在此裝置作為本機備份。
+        // 不能呼叫 saveData()，否則會造成無限回傳同步。
+        saveLocal();
+        renderAll();
     }
 };
 
@@ -5838,29 +5244,12 @@ window.YaoCloudDataBridge = {
    START
 ========================================================= */
 
-document.addEventListener(
-    "DOMContentLoaded",
-    () => {
+document.addEventListener("DOMContentLoaded", () => {
+    selectedMonth = getCurrentMonth();
 
-        bindEvents();
+    bindEvents();
 
-
-        if (
-            $("monthPicker")
-        ) {
-
-            $("monthPicker")
-                .value =
-                selectedMonth;
-        }
-
-
-        if ($("recordSort")) {
-            $("recordSort").value = recordSortOrder;
-        }
-
-        updateQuickRecordPreview();
-        render();
-
-    }
-);
+    $("recordSort").value = recordSortOrder;
+    resetQuickStart();
+    switchTab(activeTab);
+});
