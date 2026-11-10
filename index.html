@@ -442,6 +442,14 @@ h1, h2, h3, p { margin: 0; }
 .meter-bar i.warn { background: var(--gold); }
 .meter-bar i.over { background: var(--red); }
 
+/* 特休摘要 */
+.annual { margin-bottom: 12px; padding: 13px 14px; border-radius: var(--r-md); background: var(--brand-soft); }
+.annual-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13.5px; color: var(--ink-2); }
+.annual-head strong { font-family: var(--num); font-size: 18px; color: var(--brand-2); }
+.annual-days { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.annual-days .tag { background: var(--surface); }
+.annual .meter-bar { margin-top: 9px; background: var(--surface); }
+
 /* 清單項目 */
 .list { display: grid; gap: 8px; }
 .item { padding: 13px 14px; border-radius: var(--r-md); border: 1px solid var(--line-2); background: var(--surface); }
@@ -758,8 +766,12 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
                     <h2>請假／未上班</h2>
                     <div class="sub">颱風假、事假、病假等，會依比例扣薪並判斷全勤</div>
                 </div>
-                <button class="btn sm" type="button" data-action="add-leave">＋ 新增</button>
+                <div class="actions">
+                    <button class="btn sm primary" type="button" data-action="add-annual">＋ 請特休</button>
+                    <button class="btn sm" type="button" data-action="add-leave">＋ 其他</button>
+                </div>
             </div>
+            <div class="annual" id="annualSummary"></div>
             <div class="list" id="leaves"></div>
         </section>
 
@@ -897,7 +909,7 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
             <div class="sheet-body">
                 <input id="leaveId" type="hidden">
                 <div class="fields">
-                    <div class="field"><label for="leaveDate">日期</label><input id="leaveDate" type="date" required></div>
+                    <div class="field"><label for="leaveDate" id="leaveDateLabel">日期</label><input id="leaveDate" type="date" required></div>
                     <div class="field">
                         <label for="leaveType">類型</label>
                         <select id="leaveType"></select>
@@ -914,6 +926,11 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
                         <label for="leavePct">扣薪比例（%）</label>
                         <input id="leavePct" type="number" min="0" max="100" step="1" inputmode="numeric">
                         <div class="hint">100＝當天不算薪水，50＝半薪，0＝照常給薪</div>
+                    </div>
+                    <div class="field full" id="leaveEndField">
+                        <label for="leaveEndDate">連續請到哪一天（只請一天就留空）</label>
+                        <input id="leaveEndDate" type="date">
+                        <div class="hint">會自動略過週六、週日，每個工作天各記一筆。</div>
                     </div>
                     <div class="field full">
                         <label class="check"><input id="leaveBreakFA" type="checkbox"><span>這次會扣全勤獎金</span></label>
@@ -1140,9 +1157,13 @@ body:has(.modal.show) .yao-sync-launcher { display: none !important; }
 
                 <div class="group-title"><span>請假與全勤</span></div>
                 <div class="fields">
-                    <div class="field">
+                    <div class="field full">
                         <label for="fullAttendance">全勤獎金</label>
                         <input id="fullAttendance" type="number" min="0" step="1" inputmode="numeric" placeholder="沒有就填 0">
+                    </div>
+                    <div class="field">
+                        <label for="annualDays">今年特休天數</label>
+                        <input id="annualDays" type="number" min="0" step="0.5" inputmode="decimal" placeholder="例如 3">
                     </div>
                     <div class="field">
                         <label for="dayDivisor">日薪＝月薪 ÷</label>

@@ -40,7 +40,8 @@ const DEFAULT_SETTINGS = {
     fullAttendanceIncluded: true,
     mileageRate: 6,
     mileageWearRate: 3,
-    payNextMonth: true
+    payNextMonth: true,
+    annualDays: 0
 };
 
 const LEAVE_TYPES = {
@@ -130,6 +131,7 @@ function normaliseSettings(source) {
     s.fullAttendanceIncluded = s.fullAttendanceIncluded !== false;
     s.earlyOvertime = s.earlyOvertime !== false;
     s.payNextMonth = s.payNextMonth !== false;
+    s.annualDays = Math.max(0, num(s.annualDays));
     s.mileageRate = Math.max(0, num(s.mileageRate));
     s.mileageWearRate = Math.max(0, num(s.mileageWearRate));
 
@@ -1082,7 +1084,7 @@ function leaveItemHTML(leave) {
                     <div class="item-title">${escapeHTML(formatDate(leave.date))}</div>
                     <div class="item-sub">${escapeHTML(getLeaveLabel(leave.type))} ・ ${hoursText(r.hours)} ・ 扣薪 ${r.pct}%${leave.note ? "<br>" + escapeHTML(leave.note) : ""}</div>
                 </div>
-                <div class="item-amt ${r.deduction > 0 ? "neg" : ""}">${r.deduction > 0 ? "−" + money(r.deduction) : "不扣薪"}</div>
+                <div class="item-amt ${r.deduction > 0 ? "neg" : ""}">${r.deduction > 0 ? "−" + money(r.deduction) : (leave.type === "annual" ? "照常給薪" : "不扣薪")}</div>
             </div>
             <div class="item-foot">
                 <div class="tags">
@@ -1143,7 +1145,58 @@ function renderRecords() {
         : '<div class="empty">本月尚無出勤紀錄</div>';
 }
 
+function annualStats(year) {
+    const list = sortByDate(
+        settings.leaves.filter(item => item.type === "annual" && String(item.date || "").startsWith(year + "-")),
+        "asc"
+    );
+
+    const used = list.reduce((sum, item) => sum + Math.max(0, num(item.hours)) / 8, 0);
+
+    return {
+        list,
+        used,
+        total: settings.annualDays,
+        left: settings.annualDays - used
+    };
+}
+
+function daysText(value) {
+    const n = Math.round(num(value) * 100) / 100;
+    return (Number.isInteger(n) ? String(n) : String(n)) + " 天";
+}
+
+function renderAnnual() {
+    const el = $("annualSummary");
+    if (!el) return;
+
+    const year = selectedMonth.slice(0, 4);
+    const a = annualStats(year);
+    const today = getTodayString();
+
+    const chips = a.list.map(item => {
+        const half = num(item.hours) < 8 ? `（${hoursText(item.hours)}）` : "";
+        const future = item.date > today ? " green" : "";
+        return `<button class="tag${future}" type="button" data-action="edit-leave" data-id="${escapeHTML(item.id)}" style="border:0;cursor:pointer">${escapeHTML(formatShortDate(item.date))}${half}</button>`;
+    }).join("");
+
+    const ratio = a.total > 0 ? Math.min(1, a.used / a.total) : 0;
+
+    el.innerHTML = `
+        <div class="annual-head">
+            <span>${year} 年特休　已用 <strong>${daysText(a.used)}</strong>${a.total > 0 ? ` ／ 共 ${daysText(a.total)}` : ""}</span>
+            <span>${a.total > 0
+                ? (a.left >= 0 ? `還剩 <strong>${daysText(a.left)}</strong>` : `<strong style="color:var(--red)">超過 ${daysText(-a.left)}</strong>`)
+                : "到「設定」填今年特休天數，就會顯示剩幾天"}</span>
+        </div>
+        ${a.total > 0 ? `<div class="meter-bar"><i class="${a.left < 0 ? "over" : ""}" style="width:${(ratio * 100).toFixed(1)}%"></i></div>` : ""}
+        ${chips ? `<div class="annual-days">${chips}</div>` : ""}
+    `;
+}
+
 function renderLeaves(c) {
+    renderAnnual();
+
     const el = $("leaves");
     if (!el) return;
 
@@ -1417,7 +1470,7 @@ function applyLeaveTypeDefault() {
     updateLeavePreview();
 }
 
-function openLeave(id = null, date = null) {
+function openLeave(id = null, date = null, type = "typhoon") {
     fillLeaveTypes();
     $("leaveForm").reset();
     $("leaveId").value = "";
@@ -1436,15 +1489,47 @@ function openLeave(id = null, date = null) {
         $("leaveBreakFA").checked = Boolean(leave.breakFA);
         $("leaveNote").value = leave.note || "";
     } else {
-        $("leaveModalTitle").textContent = "請假／未上班";
+        $("leaveModalTitle").textContent = type === "annual" ? "請特休" : "請假／未上班";
         $("leaveDate").value = date || defaultDate();
-        $("leaveType").value = "typhoon";
+        $("leaveType").value = LEAVE_TYPES[type] ? type : "typhoon";
         $("leaveHours").value = 8;
         applyLeaveTypeDefault();
     }
 
+    // 連續日期只在新增時提供。
+    $("leaveEndDate").value = "";
+    $("leaveEndField").hidden = Boolean(leave);
+    $("leaveDateLabel").textContent = leave ? "日期" : "日期（連續請假填第一天）";
+
     updateLeavePreview();
     openModal("leaveModal");
+}
+
+// 把開始～結束日期展開成工作天清單（略過週六、週日）。
+function leaveDatesFromForm() {
+    const start = $("leaveDate").value;
+    const end = $("leaveEndField").hidden ? "" : $("leaveEndDate").value;
+
+    if (!start) return [];
+    if (!end || end <= start) return [start];
+
+    const dates = [];
+    const cursor = new Date(start + "T00:00:00");
+    const last = new Date(end + "T00:00:00");
+
+    while (cursor <= last && dates.length < 62) {
+        const day = cursor.getDay();
+
+        if (day !== 0 && day !== 6) {
+            dates.push(
+                cursor.getFullYear() + "-" + pad2(cursor.getMonth() + 1) + "-" + pad2(cursor.getDate())
+            );
+        }
+
+        cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return dates;
 }
 
 function updateLeavePreview() {
@@ -1452,6 +1537,8 @@ function updateLeavePreview() {
     if (!preview) return;
 
     const date = $("leaveDate").value;
+    const dates = leaveDatesFromForm();
+    const isAnnual = $("leaveType").value === "annual";
     const r = calculateLeave({
         date,
         hours: $("leaveHours").value,
@@ -1460,11 +1547,33 @@ function updateLeavePreview() {
 
     const lines = [];
 
+    if (dates.length > 1) {
+        lines.push(`共 <strong>${dates.length}</strong> 個工作天（${escapeHTML(formatShortDate(dates[0]))} ～ ${escapeHTML(formatShortDate(dates[dates.length - 1]))}，已略過週末）`);
+    }
+
     lines.push(
         r.deduction > 0
-            ? `扣薪 <strong class="bad">−${money(r.deduction)}</strong>（時薪 ${money(r.hourlyRate)} × ${hoursText(r.hours)} × ${r.pct}%）`
-            : "這筆不扣薪，只留下紀錄。"
+            ? `${dates.length > 1 ? "每天" : ""}扣薪 <strong class="bad">−${money(r.deduction)}</strong>（時薪 ${money(r.hourlyRate)} × ${hoursText(r.hours)} × ${r.pct}%）` +
+              (dates.length > 1 ? `，合計 <strong class="bad">−${money(r.deduction * dates.length)}</strong>` : "")
+            : (isAnnual ? "特休照常給薪，不扣薪、不扣全勤。" : "這筆不扣薪，只留下紀錄。")
     );
+
+    if (isAnnual) {
+        const year = (date || getTodayString()).slice(0, 4);
+        const a = annualStats(year);
+        const editing = settings.leaves.find(item => String(item.id) === $("leaveId").value);
+        const before = editing && editing.type === "annual" ? num(editing.hours) / 8 : 0;
+        const after = a.used - before + (r.hours / 8) * Math.max(1, dates.length);
+
+        if (a.total > 0) {
+            const left = a.total - after;
+            lines.push(
+                left >= 0
+                    ? `請完後 ${year} 年特休剩 <strong>${daysText(left)}</strong>（共 ${daysText(a.total)}）`
+                    : `<span class="bad">請完後會超過特休天數 ${daysText(-left)}</span>（共 ${daysText(a.total)}）`
+            );
+        }
+    }
 
     if ($("leaveBreakFA").checked) {
         lines.push(
@@ -1498,15 +1607,34 @@ function saveLeave(event) {
     }
 
     const index = settings.leaves.findIndex(item => String(item.id) === String(id));
+    let message = "已儲存";
 
-    if (id && index !== -1) settings.leaves[index] = data;
-    else settings.leaves.push(data);
+    if (id && index !== -1) {
+        settings.leaves[index] = data;
+    } else {
+        // 連續請假：每個工作天各記一筆；同一天同類型已有紀錄就略過。
+        const dates = leaveDatesFromForm();
+        let added = 0;
+
+        dates.forEach(date => {
+            if (settings.leaves.some(item => item.date === date && item.type === data.type)) return;
+            settings.leaves.push({ ...data, id: uid(), date });
+            added++;
+        });
+
+        if (!added) {
+            alert("這些日期已經有同類型的紀錄了。");
+            return;
+        }
+
+        if (dates.length > 1) message = `已新增 ${added} 天${getLeaveLabel(data.type)}`;
+    }
 
     selectedMonth = getMonthFromDate(data.date) || selectedMonth;
     saveData();
     closeModals();
     render();
-    toast("已儲存");
+    toast(message);
 }
 
 function deleteLeave(id) {
@@ -1694,6 +1822,7 @@ function openDay(date) {
 
     $("dayFoot").innerHTML = `
         <button class="btn primary" type="button" data-action="add-record" data-date="${date}">＋ 出勤</button>
+        <button class="btn" type="button" data-action="add-annual" data-date="${date}">＋ 特休</button>
         <button class="btn" type="button" data-action="add-leave" data-date="${date}">＋ 請假／未上班</button>
         <button class="btn" type="button" data-action="add-mileage" data-date="${date}">＋ 里程</button>
     `;
@@ -1757,6 +1886,7 @@ function openSettings() {
     $("fullAttendance").value = settings.fullAttendance;
     $("fullAttendanceIncluded").checked = settings.fullAttendanceIncluded;
     $("dayDivisor").value = settings.dayDivisor;
+    $("annualDays").value = settings.annualDays || "";
     $("setMileageRate").value = settings.mileageRate;
     $("setMileageWear").value = settings.mileageWearRate;
     $("themeSelect").value = getTheme();
@@ -1801,6 +1931,7 @@ function saveSettings(event) {
         fullAttendanceIncluded: $("fullAttendanceIncluded").checked,
         dayDivisor: num($("dayDivisor").value) > 0 ? num($("dayDivisor").value) : 30,
         payNextMonth: $("payNextMonth").checked,
+        annualDays: Math.max(0, num($("annualDays").value)),
         mileageRate: Math.max(0, num($("setMileageRate").value)),
         mileageWearRate: Math.max(0, num($("setMileageWear").value)),
         salaryHistory,
@@ -2949,6 +3080,109 @@ function buildSalaryPDF() {
             monthRecords
         );
 
+
+    /* V3：請假、補貼、扣款與里程現金 */
+    const calc =
+        computeMonth(selectedMonth);
+
+    const settlementRow = (label, amount, negative = false) => `
+            <div class="settlement-row">
+                <span class="settlement-label">
+                    ${escapeHTML(label)}
+                </span>
+                <span class="settlement-value">
+                    ${negative ? "- " : ""}${pdfMoney(amount)}
+                </span>
+            </div>
+        `;
+
+    const incomeRows = [
+        calc.faBonus ? settlementRow("全勤獎金", calc.faBonus) : "",
+        ...settings.fixedItems
+            .filter(item => item.kind === "income")
+            .map(item => settlementRow((item.name || "固定津貼") + "（每月固定）", item.amount)),
+        ...calc.monthItems
+            .filter(item => item.kind === "income")
+            .map(item => settlementRow(item.name || "補貼", item.amount))
+    ].join("");
+
+    const deductRows = [
+        calc.leaveDeduct ? settlementRow("請假／未上班扣薪", calc.leaveDeduct, true) : "",
+        calc.faDeduct ? settlementRow("全勤獎金扣除", calc.faDeduct, true) : "",
+        ...settings.fixedItems
+            .filter(item => item.kind !== "income")
+            .map(item => settlementRow((item.name || "固定扣款") + "（每月固定）", item.amount, true)),
+        ...calc.monthItems
+            .filter(item => item.kind !== "income")
+            .map(item => settlementRow(item.name || "扣款", item.amount, true))
+    ].join("");
+
+    const leaveRows = calc.monthLeaves
+        .slice()
+        .sort((x, y) => String(x.date).localeCompare(String(y.date)))
+        .map(leave => {
+            const result = calculateLeave(leave);
+
+            return `
+                <tr>
+                    <td class="date-cell">
+                        ${escapeHTML(formatShortDate(leave.date))}
+                    </td>
+                    <td>
+                        ${escapeHTML(getLeaveLabel(leave.type))}
+                    </td>
+                    <td>
+                        ${escapeHTML(leave.note || "—")}
+                    </td>
+                    <td>
+                        ${pdfHours(result.hours)}
+                    </td>
+                    <td>
+                        ${result.pct}%${leave.breakFA ? "・扣全勤" : ""}
+                    </td>
+                    <td class="money ${result.deduction > 0 ? "negative" : ""}">
+                        ${result.deduction > 0 ? "- " + pdfMoney(result.deduction) : "照常給薪"}
+                    </td>
+                </tr>
+            `;
+        })
+        .join("");
+
+    const leaveSection = calc.monthLeaves.length ? `
+    <section class="section">
+
+        <h2 class="section-title">
+            請假／未上班明細
+        </h2>
+
+        <table class="daily-table">
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>類型</th>
+                    <th>備註</th>
+                    <th>時數</th>
+                    <th>扣薪比例</th>
+                    <th>扣薪</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${leaveRows}
+                <tr class="total-row">
+                    <td colspan="3">本月合計</td>
+                    <td>${pdfHours(calc.leaveHours)}</td>
+                    <td>—</td>
+                    <td class="money">${calc.leaveDeduct > 0 ? "- " + pdfMoney(calc.leaveDeduct) : pdfMoney(0)}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="note">
+            扣薪＝時薪 × 時數 × 扣薪比例；特休照常給薪。
+        </div>
+
+    </section>
+    ` : "";
 
     const generatedAt =
         new Date();
@@ -4307,12 +4541,12 @@ tr {
     <div class="header">
 
         <div class="header-title">
-            YAO｜加班與額外收入薪資明細
+            YAO｜薪資與加班明細
         </div>
 
 
         <div class="header-subtitle">
-            Overtime & Additional Income Statement
+            Salary & Overtime Statement
         </div>
 
 
@@ -4358,116 +4592,70 @@ tr {
             薪資總覽
         </h2>
 
-
         <div class="summary-grid">
 
-
             <div class="summary-card">
-
                 <div class="label">
                     基本月薪
                 </div>
-
                 <div class="value">
-                    ${pdfMoney(
-                        getSalaryForMonth(selectedMonth)
-                    )}
+                    ${pdfMoney(calc.salary)}
                 </div>
-
             </div>
 
-
             <div class="summary-card">
-
                 <div class="label">
                     本月加班費
                 </div>
-
                 <div class="value">
-                    ${pdfMoney(
-                        totals.overtimePay
-                    )}
+                    ${pdfMoney(calc.overtimePay)}
                 </div>
-
             </div>
-
 
             <div class="summary-card">
-
                 <div class="label">
-                    里程補助
+                    補貼／獎金
                 </div>
-
                 <div class="value">
-                    ${pdfMoney(
-                        totals.mileageGross
-                    )}
+                    ${pdfMoney(calc.extraIncome)}
                 </div>
-
             </div>
-
 
             <div class="summary-card">
-
                 <div class="label">
-                    車輛損耗
+                    請假與扣款
                 </div>
-
                 <div class="value">
-                    - ${pdfMoney(
-                        totals.mileageWear
-                    )}
+                    ${calc.totalDeduct > 0 ? "- " : ""}${pdfMoney(calc.totalDeduct)}
                 </div>
-
             </div>
-
 
             <div class="summary-card">
-
                 <div class="label">
-                    里程淨收入
+                    預估薪資入帳
                 </div>
-
                 <div class="value">
-                    ${pdfMoney(
-                        totals.mileageNet
-                    )}
+                    ${pdfMoney(calc.payNet)}
                 </div>
-
             </div>
-
 
             <div class="summary-card">
-
                 <div class="label">
-                    本月額外收入
+                    里程淨利（現金）
                 </div>
-
                 <div class="value">
-                    ${pdfMoney(
-                        totals.extraIncome
-                    )}
+                    ${pdfMoney(calc.mileageNet)}
                 </div>
-
             </div>
 
-
-            <!-- 最重要 -->
             <div class="summary-card highlight">
-
                 <div class="label">
                     預估總收入
                 </div>
-
-
                 <div class="value">
-                    ${pdfMoney(
-                        totals.totalIncome
-                    )}
+                    ${pdfMoney(calc.totalIncome)}
                 </div>
-
             </div>
-
 
         </div>
 
@@ -4540,9 +4728,7 @@ tr {
 
                 <strong>
                     ${pdfMoney(
-                        Number(
-                            getSalaryForMonth(selectedMonth) || 0
-                        ) / 240
+                        getHourlyRate(selectedMonth)
                     )}
                 </strong>
 
@@ -4779,7 +4965,7 @@ tr {
                     </th>
 
                     <th>
-                        損耗方式
+                        管銷方式
                     </th>
 
                     <th>
@@ -4787,11 +4973,11 @@ tr {
                     </th>
 
                     <th>
-                        損耗
+                        管銷
                     </th>
 
                     <th>
-                        淨收入
+                        淨利
                     </th>
 
                 </tr>
@@ -4872,6 +5058,8 @@ tr {
     </section>
 
 
+    ${leaveSection}
+
     <!-- =================================================
          本月結算
     ================================================= -->
@@ -4882,101 +5070,27 @@ tr {
             本月結算
         </h2>
 
-
         <div class="settlement">
 
-
             <div class="settlement-title">
-                本月額外收入組成
+                本月收入組成
             </div>
 
-
-            <div class="settlement-row">
-
-                <span class="settlement-label">
-                    基本月薪
-                </span>
-
-                <span class="settlement-value">
-
-                    ${pdfMoney(
-                        getSalaryForMonth(selectedMonth)
-                    )}
-
-                </span>
-
-            </div>
-
-
-            <div class="settlement-row">
-
-                <span class="settlement-label">
-                    ${overtimeLabel}
-                    加班費
-                </span>
-
-                <span class="settlement-value">
-
-                    ${pdfMoney(
-                        totals.overtimePay
-                    )}
-
-                </span>
-
-            </div>
-
-
-            <div class="settlement-row">
-
-                <span class="settlement-label">
-                    ${mileageLabel}
-                    里程淨收入
-                </span>
-
-                <span class="settlement-value">
-
-                    ${pdfMoney(
-                        totals.mileageNet
-                    )}
-
-                </span>
-
-            </div>
-
-
-            <div class="settlement-row">
-
-                <span class="settlement-label">
-                    本月額外收入
-                </span>
-
-                <span class="settlement-value">
-
-                    ${pdfMoney(
-                        totals.extraIncome
-                    )}
-
-                </span>
-
-            </div>
-
+            ${settlementRow("基本月薪", calc.salary)}
+            ${settlementRow(overtimeLabel + " 加班費", calc.overtimePay)}
+            ${incomeRows}
+            ${deductRows}
+            ${settlementRow("預估薪資入帳（薪轉）", calc.payNet)}
+            ${settlementRow(mileageLabel + " 里程淨利（現金，不入薪轉）", calc.mileageNet)}
 
             <div class="settlement-final">
-
                 <div class="label">
                     預估總收入
                 </div>
-
                 <div class="value">
-
-                    ${pdfMoney(
-                        totals.totalIncome
-                    )}
-
+                    ${pdfMoney(calc.totalIncome)}
                 </div>
-
             </div>
-
 
         </div>
 
@@ -5075,7 +5189,7 @@ tr {
             加班倍率依 1.34 倍、1.67 倍及 2.67 倍分段計算。
             平日加班依設定的平日加班開始時間計算；
             休假日及國定／公司假日依實際工作時間扣除休息時間後計算。
-                    ${escapeHTML(getPDFAdjustNote())}
+                    請假扣薪依時薪 × 時數 × 扣薪比例計算。里程補助為現金，扣除管銷後的淨利計入總收入，不列入薪轉。
 
         </div>
 
@@ -5089,7 +5203,7 @@ tr {
     <div class="footer">
 
         <span>
-            YAO 加班費計算器
+            YAO 薪資管家
         </span>
 
 
@@ -5205,6 +5319,7 @@ const ACTIONS = {
     },
 
     "add-leave": el => openLeave(null, el.dataset.date || null),
+    "add-annual": el => openLeave(null, el.dataset.date || null, "annual"),
     "edit-leave": el => openLeave(el.dataset.id),
     "delete-leave": el => deleteLeave(el.dataset.id),
     "leave-hours": el => { $("leaveHours").value = el.dataset.hours; updateLeavePreview(); },
